@@ -1,5 +1,5 @@
 binary = Analyzer
-test_binary = test
+test_binary = Test
 include_folder = ./code/include
 analyzer_folder = ./code/Analyzer
 ENVI_folder = ./code/ENVI_reader

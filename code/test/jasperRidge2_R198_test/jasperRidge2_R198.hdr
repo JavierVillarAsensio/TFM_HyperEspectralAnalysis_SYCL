@@ -1,0 +1,12 @@
+    ENVI
+samples = 3
+lines   = 3
+bands   = 2
+header offset = 0
+data type = 2
+interleave = bil
+byte order = 0
+wavelength units = Nanometers
+reflectance scale factor = 10000.000000
+wavelength = {
+  2000.0, 4000.0}

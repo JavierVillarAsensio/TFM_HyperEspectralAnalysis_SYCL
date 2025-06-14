@@ -1,0 +1,8 @@
+X Units: Wavelength (micrometers)
+First X Value:  5.0
+Last X Value: 1.0000
+5.0 0.0
+4.0 20.0
+3.0 0.0
+2.0 20.0
+1.0 0.0
