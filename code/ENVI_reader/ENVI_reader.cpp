@@ -147,7 +147,7 @@ namespace ENVI_reader {
         ifstream file(filename);
 
         if(!file.is_open() && !file.good()){
-            cout << "Error opening the hdr file." << endl;
+            cerr << "Error opening the hdr file." << endl;
             return nullopt;
         }
 

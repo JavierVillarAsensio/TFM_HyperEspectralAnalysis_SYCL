@@ -1,11 +1,9 @@
 #include "config_test.h"
 #include <iostream>
+#include <fstream>
 
 using namespace std;
 
-int width, height, n_channels, header_offset;
-size_t file_count;
-string wavelength_unit_hdr;
 ENVI_reader::ENVI_properties properties;
 
 exit_code write_test_img_bil(){
@@ -31,8 +29,8 @@ exit_code write_test_img_bil(){
     return EXIT_SUCCESS;
 }
 
-exit_code test_read_hdr() {
-    optional<const ENVI_reader::ENVI_properties> opt_properties = ENVI_reader::read_hdr(TEST_HDR_FILE_PATH);
+exit_code test_read_hdr(const char *filename) {
+    optional<const ENVI_reader::ENVI_properties> opt_properties = ENVI_reader::read_hdr(filename);
     properties = opt_properties.value();
     if(!ENVI_reader::check_properties(properties)){
         if (properties.wavelength_unit != TEST_WAVELENGTH_UNITS)
@@ -58,21 +56,49 @@ exit_code test_read_hdr() {
     else return EXIT_FAILURE;
 }
 
-template<typename Callback>
-void test(Callback do_test, const string str, int &tests_passed, int &tests_done){
+exit_code test_read_fake_hdr(const char *filename) {
+    optional<const ENVI_reader::ENVI_properties> opt_properties = ENVI_reader::read_hdr(filename);
+    if(!opt_properties) 
+        return EXIT_SUCCESS;
+    else return EXIT_FAILURE;
+}
+
+template<typename Callback, typename... Args>
+void test(Callback do_test, const string str, int &tests_passed, int &tests_done, Args&&... args){
     tests_done++;
-    exit_code code = do_test();
-    cout << "Testing " << str << ": " << TEST_RESULTS[code] << endl;;
+    exit_code code = do_test(forward<Args>(args)...);
+    cout << "#" << tests_done << " Testing "  << str << ": " << TEST_RESULTS[code] << endl;;
     if (!code)
         tests_passed++;
 }
 
-int main(){
+void read_test_program_properties(int argc, const char **argv){
+    int index = 2;
+    string param;
+
+    if (argc > 1) {
+        while (index < argc+1){
+            param = argv[index];
+            if(param == INFOFILE_PARAM || param == INFOFILE_PARAM_SHORT) {
+                static ofstream infofile(argv[++index]);
+                cout.rdbuf(infofile.rdbuf());
+            }
+            else if (param == ERRORFILE_PARAM || param == ERRORFILE_PARAM_SHORT) {
+                static ofstream errorfile(argv[++index]);
+                cerr.rdbuf(errorfile.rdbuf());
+            }
+        }
+    }
+}
+
+int main(int argc, char **argv){
+    read_test_program_properties(argc, argv);
     int tests_done = 0, tests_passed = 0;
     if(write_test_img_bil()){
-        cout << "An unexpected error ocurred writing the test image" << endl;
+        cerr << "An unexpected error ocurred writing the test image" << endl;
         return EXIT_FAILURE;
     }
 
-    test(test_read_hdr, "read of .hdr ENVI header file",tests_passed, tests_done);
+    test(test_read_hdr, "read of .hdr ENVI header file",tests_passed, tests_done, TEST_HDR_FILE_PATH);
+    test(test_read_fake_hdr, "read of non existent .hdr ENVI header file shows error",tests_passed, tests_done, "a");
 }

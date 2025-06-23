@@ -1,4 +1,8 @@
 Test
 Analyzer
 .vscode/
-code/Analyzer/jasperRidge2_R198/
+errors.txt
+spectrums/2/*
+spectrums/3/*
+spectrums/4/*
+spectrums/spectrums.csv

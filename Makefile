@@ -14,3 +14,4 @@ compile_test:
 clean:
 	rm -f $(binary)
 	rm -f $(test_binary)
+	rm -f *.txt

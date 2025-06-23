@@ -4,6 +4,12 @@
 #include "ENVI_reader.h"
 #include <string>
 
+/////////ROGRAM_PROPERTIES//////////
+#define INFOFILE_PARAM "--infofile"
+#define INFOFILE_PARAM_SHORT "-if"
+#define ERRORFILE_PARAM "--errorfile"
+#define ERRORFILE_PARAM_SHORT "-ef"
+
 ////////////GENERAL DATA////////////
 #define TEST_IMG_FILE_PATH "code/test/jasperRidge2_R198_test/jasperRidge2_R198.img"
 #define TEST_HDR_FILE_PATH "code/test/jasperRidge2_R198_test/jasperRidge2_R198.hdr"
