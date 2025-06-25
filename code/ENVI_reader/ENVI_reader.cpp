@@ -2,14 +2,11 @@
 #include <iostream>
 #include <fstream>
 #include <unordered_map>
-#include <string>
 #include <sstream>
 #include <algorithm>
+#include <cstring>
 
 
-
-//constants
-#define PERCENTAGE_REFACTOR 100
 
 //hdr needed fields
 #define WAVELENGTH_FIELD "wavelength"
@@ -24,25 +21,30 @@
 #define END_FIELD "}"
 
 //spectrum needed fields
+#define SPECTRUM_N_NEEDED_FIELDS 4
 #define SPECTRUM_FIRST_VALUE_FIELD "First X Value"
 #define SPECTRUM_LAST_VALUE_FIELD "Last X Value" 
-#define SPEC_WAVELENGTH_UNIT_FIELD "X Units"
+#define SPECTRUM_WAVELENGTH_UNIT_FIELD "X Units"
+#define SPECTRUM_NAME_FIELD "Name"
 
 
 
 using namespace std;
 using namespace ENVI_reader;
 
+
+
+//constant variables
 const unordered_map<string, int> data_type_mapper = {  //missing types not implemented
     {"1",  1},    //8-bit unsigned int
     {"2",  2},    //16-bit signed int
     {"3",  4},    //32-bit signed int
     {"4",  4},    //32-bit float
     {"5",  8},    //64-bit double
-    {"12", 2},   //16-bit unsigned int
-    {"13", 4},   //32-bit unsigned long
-    {"14", 8},   //64-bit long signed int
-    {"15", 8}    //64-bit unsigned long int
+    {"12", 2},    //16-bit unsigned int
+    {"13", 4},    //32-bit unsigned long
+    {"14", 8},    //64-bit long signed int
+    {"15", 8}     //64-bit unsigned long int
 };
 
 const unordered_map<string, int> wavelength_unit_mapper = {  //units per meter
@@ -59,30 +61,29 @@ const unordered_map<string, int> wavelength_unit_mapper = {  //units per meter
     {"Angstroms", 10000000000}   //1e+10
 };
 
+const unordered_map<string, Interleave> interleave_mapper = {
+    {"bsq", BSQ},
+    {"bil", BIL},
+    {"bip", BIP}
+};
 
 
-int ENVI_map(const string str, unordered_map<string, int> mapper){
-    unordered_map<string, int>::const_iterator map = mapper.find(str);
 
-    if(map == mapper.end())
-        cout << "Could not find a supported value for the property \"" << str << "\" in the .hdr ENVI header file" << endl;
+//struct functions
+size_t ENVI_properties::get_image_size() const { return samples * lines * bands; }
+ENVI_properties::~ENVI_properties() { free(wavelengths); }
+
+
+
+//non public functions
+template <typename value>
+value map(const string str, unordered_map<string, value> mapper){
+    typename unordered_map<string, value>::const_iterator mapped = mapper.find(str);
+
+    if(mapped == mapper.end())
+        throw runtime_error("Error reading .hdr file. Could not find a valid option for \"" + str + "\"");
     else
-        return map->second;
-
-    return -1;
-}
-
-Interleave map_interleave(const string str) {
-    if (str == "bsq")
-        return BSQ;
-    else if(str == "bil")
-        return BIL;
-    else if(str == "bip")
-        return BIP;
-    else {
-        cout << "Could not match an interleave supported type for \"" << str << "\" in the .hdr ENVI header file" << endl;
-        return ERROR;
-    }
+        return mapped->second;
 }
 
 int stoi_wrapper(const string &s){return stoi(s);}
@@ -99,7 +100,41 @@ auto extract_value(istringstream &lineStream, Callback cb, bool mapping, Args&&.
     return cb(value, forward<Args>(args)...);
 }
 
+void save_reflectances(ifstream& file, float* reflectances, ENVI_properties& properties, bool asc_order, int wavelengths_scale_factor){
+    string line;
+    int wavelengths_index, iterate, reflectances_index = 0;
+    float wavelength, reflectance, previous_reflectance, diff, previous_diff = 10000000;
+    
+    if (asc_order){
+        wavelengths_index = 0;
+        iterate = 1;
+    }
+    else {
+        wavelengths_index = properties.bands;
+        iterate = -1;
+    }
 
+    if(!properties.reflectance_scale_factor == wavelengths_scale_factor) {
+        for(int i = 0; i < properties.bands; i++)
+            properties.wavelengths[i] /= wavelengths_scale_factor;
+        properties.reflectance_scale_factor = wavelengths_scale_factor;
+    }
+
+    while (getline(file, line)){ 
+        istringstream line_stream(line);
+
+        line_stream >> wavelength >> reflectance;
+
+        diff = abs(properties.wavelengths[wavelengths_index] - wavelength);
+        if(previous_diff < diff){
+            reflectances[reflectances_index++] = previous_reflectance;
+            wavelengths_index += iterate;
+        }
+        
+        previous_diff = diff;
+        previous_reflectance = reflectance;
+    }
+}
 
 
 
@@ -198,16 +233,13 @@ namespace ENVI_reader {
                     properties.header_offset = extract_value(lineStream, stoi_wrapper, false);                
 
                 else if(key == WAVELENGTH_UNIT_FIELD)
-                    properties.wavelength_unit = extract_value(lineStream, ENVI_map, true, wavelength_unit_mapper);
+                    properties.wavelength_unit = extract_value(lineStream, map<decltype(properties.wavelength_unit)>, true, wavelength_unit_mapper);
 
                 else if(key == DATA_TYPE_FIELD)                    
-                    properties.data_type_size = extract_value(lineStream, ENVI_map, true, data_type_mapper);
-
-                else if(key == REFLECTANCE_SCALE_FACTOR_FIELD)                     
-                    properties.reflectance_scale_factor = extract_value(lineStream, stof_wrapper, false);                
+                    properties.data_type_size = extract_value(lineStream, map<decltype(properties.data_type_size)>, true, data_type_mapper);
 
                 else if(key == INTERLEAVE_FIELD)                                         
-                    properties.interleave = extract_value(lineStream, map_interleave, true);                
+                    properties.interleave = extract_value(lineStream, map<decltype(properties.interleave)>, true, interleave_mapper);                
             }
         }
 
@@ -228,39 +260,98 @@ namespace ENVI_reader {
      * @return EXIT_SUCCESS or EXIT_FAILURE if any error is detected
      */
     exit_code read_img_bil(float *img, const ENVI_properties properties, const char* filename) {
-        int n_pixels = properties.samples * properties.lines * properties.bands;
-
-        ifstream file(filename, ios::binary);
+        ifstream file(filename, ios::binary | ios::ate);
         if(!file.is_open()){
-            cout << "Error opening the img file, it could not be opened." << endl;
+            cerr << "Error opening the img file, it could not be opened." << endl;
             return EXIT_FAILURE;
         }
 
-        int index = 0, data_size = properties.data_type_size;
-        char buffer[data_size];
-        short int value;
-        float refl;
+        size_t image_size_3D = properties.get_image_size(), data_size = properties.data_type_size;
+        char *bin_image = new char[image_size_3D * data_size];
 
-        //skip header bytes
-        streampos offset = streampos(properties.header_offset);
-        file.seekg(offset, ios::beg);
-        while(index < n_pixels){
-            file.read(reinterpret_cast<char*>(&value), data_size);
-
-            refl = static_cast<float>(value)/PERCENTAGE_REFACTOR;
-            if(refl < 0)
-                refl = 0;
-
-            img[index++] = refl;
+        streamsize file_size = file.tellg();
+        file.seekg(0, ios::beg);
+        if (file_size != image_size_3D){
+            cerr << "Error, the number of bytes of the image is not the expected" << endl;
+            delete[] bin_image;
+            return EXIT_FAILURE;
         }
 
+        if (!file.read(bin_image, image_size_3D)){
+            cerr << "Error reading img file." << endl;
+            delete[] bin_image;
+            return EXIT_FAILURE;
+        }
         file.close();
 
-        if (index != n_pixels){
-            cout << "Error reading img file, the number of pixels read was not the expected." << endl;
-            return EXIT_FAILURE;
+        memcpy(img, bin_image, image_size_3D);
+        delete[] bin_image;
+
+        return EXIT_SUCCESS;
+    }
+
+
+
+    /**
+     * @brief Reads reflectances of a spectrum file
+     * 
+     * Given a spectrum file it stores its reflectances, also returns the
+     * name of the spectrum and may change the properties wavelenghts to
+     * match the wavelength unit of the spectrums
+     * 
+     * @param filename Path to the file of the spectrum
+     * @param reflectances pointer to store the reflectances
+     * @param name reference to the direction where the spectrum name will be stored
+     * @param properties struct with the properties of the .hdr file
+     */
+    exit_code read_spectrum(string filename, float* reflectances, string &name, ENVI_properties& properties){
+        int order;
+
+        ifstream file(filename);
+        if(!file.is_open()){
+            cout << "Error opening the spectrum file, it could not be opened. Aborting." << endl;
+            return(EXIT_FAILURE);
         }
-        else
-            return EXIT_SUCCESS;
+
+        string line, segment, wavelength_unit_spec;
+        int needed_fields_found = 0;
+        float first_value, last_value;
+
+        while (needed_fields_found < SPECTRUM_N_NEEDED_FIELDS) {
+            getline(file, line);
+            istringstream line_stream(line);
+            getline(line_stream, segment, ':');
+
+            if (segment == SPECTRUM_WAVELENGTH_UNIT_FIELD){
+                getline(line_stream, segment, ':');
+                size_t open = segment.find('('), close = segment.find(')');
+                if (open != string::npos && close != string::npos && close > open)
+                    wavelength_unit_spec = segment.substr(open + 1, close - open - 1);
+                needed_fields_found++;
+            }
+
+            else if (segment == SPECTRUM_FIRST_VALUE_FIELD){
+                getline(line_stream, segment, ':');
+                first_value = stof(segment);
+                needed_fields_found++;
+            }
+
+            else if (segment == SPECTRUM_LAST_VALUE_FIELD){
+                getline(line_stream, segment, ':');
+                last_value = stof(segment);
+                needed_fields_found++;
+            }
+
+            else if (segment == SPECTRUM_NAME_FIELD) {
+                getline(line_stream, segment, ':');
+                name = segment;
+            }
+        }
+        
+        int wavelength_scale_factor = properties.wavelength_unit / map(wavelength_unit_spec, wavelength_unit_mapper);
+        save_reflectances(file, reflectances, properties, first_value < last_value ? true : false, wavelength_scale_factor);
+
+        file.close();
+        return EXIT_SUCCESS;
     }
 }
