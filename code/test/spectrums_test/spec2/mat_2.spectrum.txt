@@ -1,4 +1,5 @@
-X Units: Wavelength (micrometers)
+Name: spec2
+X Units: Wavelength (Micrometers)
 First X Value:  5.0
 Last X Value: 1.0000
 5.0 0.0

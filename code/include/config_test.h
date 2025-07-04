@@ -1,18 +1,13 @@
 #ifndef CONFIG_TEST_H
 #define CONFIG_TEST_H
 
-#include "ENVI_reader.h"
+#include <Analyzer_tools.h>
 #include <string>
-
-/////////ROGRAM_PROPERTIES//////////
-#define INFOFILE_PARAM "--infofile"
-#define INFOFILE_PARAM_SHORT "-if"
-#define ERRORFILE_PARAM "--errorfile"
-#define ERRORFILE_PARAM_SHORT "-ef"
 
 ////////////GENERAL DATA////////////
 #define TEST_IMG_FILE_PATH "code/test/jasperRidge2_R198_test/jasperRidge2_R198.img"
 #define TEST_HDR_FILE_PATH "code/test/jasperRidge2_R198_test/jasperRidge2_R198.hdr"
+#define TEST_HDR_IMG_DIRECTORY "code/test/jasperRidge2_R198_test/"
 #define TEST_SPEC_FILE_PATH "code/test/spectrums_test/"
 #define TEST_RESULT_JPG_PATH "output/result.jpg"
 
@@ -31,7 +26,7 @@ constexpr int TEST_BANDS   = 2;
 constexpr int TEST_HEADER_OFFSET = 0;
 constexpr int TEST_DATA_TYPE_SIZE = 2;
 constexpr int TEST_WAVELENGTH_UNITS = 1000000000;
-constexpr int TEST_SCALE_FACTOR = 10000.000000;
+constexpr int TEST_REFLECTANCE_SCALE_FACTOR = 10000.000000;
 const ENVI_reader::Interleave TEST_INTERLEAVE = ENVI_reader::BIL;
 constexpr float TEST_WAVELENGTHS[TEST_BANDS] = {2000.0, 4000.0};
 
@@ -41,7 +36,7 @@ constexpr short int TESTING_IMG[TEST_BANDS * TEST_SAMPLES * TEST_LINES] = {
     1800, 2200,   1000, 1000,   2000, 2000,
     800, 1200,   1900, 2100,   900, 1100
 };
-size_t TESTING_IMG_N_ELEMENTS = sizeof(TESTING_IMG) / sizeof(TESTING_IMG[0]);
+const size_t TESTING_IMG_N_ELEMENTS = sizeof(TESTING_IMG) / sizeof(short int);
 
 ////////////SPECTRUMS DATA////////////
 constexpr float TEST_SPECTRUMS_CORRECT_REFLECTANCES[N_TEST_SPECTRUM_FILES] = {10.0, 20.0};

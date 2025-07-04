@@ -1,10 +1,12 @@
-#include "ENVI_reader.h"
+#include <ENVI_reader.h>
 #include <iostream>
 #include <fstream>
 #include <unordered_map>
 #include <sstream>
 #include <algorithm>
 #include <cstring>
+#include <algorithm>
+#include <cctype>
 
 
 
@@ -48,17 +50,17 @@ const unordered_map<string, int> data_type_mapper = {  //missing types not imple
 };
 
 const unordered_map<string, int> wavelength_unit_mapper = {  //units per meter
-    {"Meters",              1},
+    {"meters",              1},
     {"m",                   1},
-    {"Centimeters",       100},
+    {"centimeters",       100},
     {"cm",                100},
-    {"Millimeters",      1000},
+    {"millimeters",      1000},
     {"mm",               1000},
-    {"Micrometers",   1000000},  //1e+6
+    {"micrometers",   1000000},  //1e+6
     {"um",            1000000},  //1e+6
-    {"Nanometers", 1000000000},  //1e+9
+    {"nanometers", 1000000000},  //1e+9
     {"nm",         1000000000},  //1e+9
-    {"Angstroms", 10000000000}   //1e+10
+    {"angstroms", 10000000000}   //1e+10
 };
 
 const unordered_map<string, Interleave> interleave_mapper = {
@@ -70,20 +72,17 @@ const unordered_map<string, Interleave> interleave_mapper = {
 
 
 //struct functions
-size_t ENVI_properties::get_image_size() const { return samples * lines * bands; }
-ENVI_properties::~ENVI_properties() { free(wavelengths); }
+size_t ENVI_properties::get_image_size() const noexcept { return samples * lines * bands; }
+ENVI_properties::~ENVI_properties() noexcept { free(wavelengths); }
 
 
 
 //non public functions
 template <typename value>
-value map(const string str, unordered_map<string, value> mapper){
+value map(string str, unordered_map<string, value> mapper, value fallback){
+    transform(str.begin(), str.end(), str.begin(), [](unsigned char c){return tolower(c);});
     typename unordered_map<string, value>::const_iterator mapped = mapper.find(str);
-
-    if(mapped == mapper.end())
-        throw runtime_error("Error reading .hdr file. Could not find a valid option for \"" + str + "\"");
-    else
-        return mapped->second;
+    return (mapped == mapper.end()) ? fallback : mapped->second;
 }
 
 int stoi_wrapper(const string &s){return stoi(s);}
@@ -110,20 +109,15 @@ void save_reflectances(ifstream& file, float* reflectances, ENVI_properties& pro
         iterate = 1;
     }
     else {
-        wavelengths_index = properties.bands;
+        wavelengths_index = properties.bands -1;
         iterate = -1;
-    }
-
-    if(!properties.reflectance_scale_factor == wavelengths_scale_factor) {
-        for(int i = 0; i < properties.bands; i++)
-            properties.wavelengths[i] /= wavelengths_scale_factor;
-        properties.reflectance_scale_factor = wavelengths_scale_factor;
     }
 
     while (getline(file, line)){ 
         istringstream line_stream(line);
 
         line_stream >> wavelength >> reflectance;
+        wavelength *= wavelengths_scale_factor;
 
         diff = abs(properties.wavelengths[wavelengths_index] - wavelength);
         if(previous_diff < diff){
@@ -147,25 +141,25 @@ namespace ENVI_reader {
      * @param properties The struct to be checked
      * @return exit_code; -1 if FAILURE, 0 if EXIT_SUCCESS
      */
-    exit_code check_properties(const ENVI_properties &properties){
-        if (properties.wavelength_unit == FAILURE)
-            return FAILURE;
-        else if (properties.data_type_size == FAILURE)
-            return FAILURE;
-        else if (properties.interleave == ERROR)
-            return FAILURE;
-        else if (properties.samples == FAILURE)
-            return FAILURE;
-        else if (properties.lines == FAILURE)
-            return FAILURE;
-        else if (properties.bands == FAILURE)
-            return FAILURE;
-        else if (properties.header_offset == FAILURE)
-            return FAILURE;
-        else if (properties.reflectance_scale_factor == FAILURE)
-            return FAILURE;
-        else if (properties.wavelengths == nullptr)
-            return FAILURE;
+    exit_code check_properties(const ENVI_properties* properties){
+        if (properties->wavelength_unit == FAILURE)
+            return EXIT_FAILURE;
+        else if (properties->data_type_size == FAILURE)
+            return EXIT_FAILURE;
+        else if (properties->interleave == FAILURE)
+            return EXIT_FAILURE;
+        else if (properties->samples == FAILURE)
+            return EXIT_FAILURE;
+        else if (properties->lines == FAILURE)
+            return EXIT_FAILURE;
+        else if (properties->bands == FAILURE)
+            return EXIT_FAILURE;
+        else if (properties->header_offset == FAILURE)
+            return EXIT_FAILURE;
+        else if (properties->reflectance_scale_factor == FAILURE)
+            return EXIT_FAILURE;
+        else if (properties->wavelengths == nullptr)
+            return EXIT_FAILURE;
         else return EXIT_SUCCESS;
     }
 
@@ -176,17 +170,16 @@ namespace ENVI_reader {
      * If any of the properties cannot be read it is not initialized.
      * 
      * @param filename Path to .hdr file
-     * @return ENVI_properties struct or nullopt if file could not be found
+     * @param ENVI_properties pointer to the struct where the properties will be written
+     * @return exit_code type indicating EXIT_SUCCESS or EXIT_FAILURE
      */
-    optional<const ENVI_properties> read_hdr(const char* filename) {
+    exit_code read_hdr(const string filename, ENVI_reader::ENVI_properties* properties) {
         ifstream file(filename);
 
         if(!file.is_open() && !file.good()){
             cerr << "Error opening the hdr file." << endl;
-            return nullopt;
+            return EXIT_FAILURE;
         }
-
-        struct ENVI_properties properties;
 
         string line, key, value;
         bool waves_read = false;
@@ -214,39 +207,44 @@ namespace ENVI_reader {
                                 waves_read = true;
                         }
                     }
-                    properties.wavelengths = (float*)malloc(properties.bands * sizeof(float));
-                    *(properties.wavelengths) = *wavelengths;
+                    properties->wavelengths = (float*)malloc(properties->bands * sizeof(float));
+                    memcpy(properties->wavelengths, wavelengths, properties->bands * sizeof(float));
                     free(wavelengths);
                 }
 
                 else if(key == CHANNELS_FIELD){
-                    properties.bands = extract_value(lineStream, stoi_wrapper, false);                
-                    wavelengths = (float*)malloc(sizeof(float) * properties.bands);
+                    properties->bands = extract_value(lineStream, stoi_wrapper, false);                
+                    wavelengths = (float*)malloc(sizeof(float) * properties->bands);
                 }
                 else if(key == ROWS_FIELD)
-                    properties.lines = extract_value(lineStream, stoi_wrapper, false);                
+                    properties->lines = extract_value(lineStream, stoi_wrapper, false);                
 
                 else if(key == COLS_FIELD)
-                    properties.samples = extract_value(lineStream, stoi_wrapper, false);                
+                    properties->samples = extract_value(lineStream, stoi_wrapper, false);                
 
                 else if(key == HEADER_OFFSET_FIELD)                    
-                    properties.header_offset = extract_value(lineStream, stoi_wrapper, false);                
+                    properties->header_offset = extract_value(lineStream, stoi_wrapper, false);
+
+                else if(key == REFLECTANCE_SCALE_FACTOR_FIELD)
+                    properties->reflectance_scale_factor = extract_value(lineStream, stoi_wrapper, false);            
 
                 else if(key == WAVELENGTH_UNIT_FIELD)
-                    properties.wavelength_unit = extract_value(lineStream, map<decltype(properties.wavelength_unit)>, true, wavelength_unit_mapper);
+                    properties->wavelength_unit = extract_value(lineStream, map<decltype(properties->wavelength_unit)>, true, wavelength_unit_mapper, FAILURE);
 
                 else if(key == DATA_TYPE_FIELD)                    
-                    properties.data_type_size = extract_value(lineStream, map<decltype(properties.data_type_size)>, true, data_type_mapper);
+                    properties->data_type_size = extract_value(lineStream, map<decltype(properties->data_type_size)>, true, data_type_mapper, FAILURE);
 
                 else if(key == INTERLEAVE_FIELD)                                         
-                    properties.interleave = extract_value(lineStream, map<decltype(properties.interleave)>, true, interleave_mapper);                
+                    properties->interleave = extract_value(lineStream, map<decltype(properties->interleave)>, true, interleave_mapper, Interleave::FAILURE);                
             }
         }
 
-        if (check_properties(properties) == FAILURE)
-            return nullopt;
-
-        return properties;
+        if (check_properties(properties)){
+            cerr << "Error checking the properties struct, every variable has to have a valid value" << endl;
+            return EXIT_FAILURE;
+        }
+            
+        return EXIT_SUCCESS;
     }
 
     /**
@@ -259,33 +257,38 @@ namespace ENVI_reader {
      * @param filename Path to the hiperespectral image
      * @return EXIT_SUCCESS or EXIT_FAILURE if any error is detected
      */
-    exit_code read_img_bil(float *img, const ENVI_properties properties, const char* filename) {
+    exit_code read_img_bil(float *img, const ENVI_properties* properties, const string filename) {
         ifstream file(filename, ios::binary | ios::ate);
         if(!file.is_open()){
             cerr << "Error opening the img file, it could not be opened." << endl;
             return EXIT_FAILURE;
         }
 
-        size_t image_size_3D = properties.get_image_size(), data_size = properties.data_type_size;
-        char *bin_image = new char[image_size_3D * data_size];
+        size_t image_size_3D = properties->get_image_size(), data_size = properties->data_type_size, index = 0;
 
         streamsize file_size = file.tellg();
         file.seekg(0, ios::beg);
-        if (file_size != image_size_3D){
+        if (file_size != ((image_size_3D * data_size) + properties->header_offset)){
             cerr << "Error, the number of bytes of the image is not the expected" << endl;
-            delete[] bin_image;
+            file.close();
             return EXIT_FAILURE;
         }
 
-        if (!file.read(bin_image, image_size_3D)){
-            cerr << "Error reading img file." << endl;
-            delete[] bin_image;
-            return EXIT_FAILURE;
+        short int data;
+        float refl;
+        streampos offset = streampos(properties->header_offset);
+        file.seekg(offset, ios::beg);
+        while(index < image_size_3D) {
+            file.read(reinterpret_cast<char*>(&data), data_size);
+            refl = static_cast<float>(data);
+            
+            if(refl < 0)
+                refl = 0;
+
+            img[index++] = refl;
         }
+
         file.close();
-
-        memcpy(img, bin_image, image_size_3D);
-        delete[] bin_image;
 
         return EXIT_SUCCESS;
     }
@@ -304,9 +307,7 @@ namespace ENVI_reader {
      * @param name reference to the direction where the spectrum name will be stored
      * @param properties struct with the properties of the .hdr file
      */
-    exit_code read_spectrum(string filename, float* reflectances, string &name, ENVI_properties& properties){
-        int order;
-
+    exit_code read_spectrum(const string filename, float* reflectances, string &name, ENVI_properties& properties){
         ifstream file(filename);
         if(!file.is_open()){
             cout << "Error opening the spectrum file, it could not be opened. Aborting." << endl;
@@ -344,11 +345,13 @@ namespace ENVI_reader {
 
             else if (segment == SPECTRUM_NAME_FIELD) {
                 getline(line_stream, segment, ':');
+                segment.erase(segment.find_last_not_of(" \n\r\t")+1); //erase spaces or any dirty char
                 name = segment;
+                needed_fields_found++;
             }
         }
         
-        int wavelength_scale_factor = properties.wavelength_unit / map(wavelength_unit_spec, wavelength_unit_mapper);
+        int wavelength_scale_factor = properties.wavelength_unit / map(wavelength_unit_spec, wavelength_unit_mapper, -1);
         save_reflectances(file, reflectances, properties, first_value < last_value ? true : false, wavelength_scale_factor);
 
         file.close();
