@@ -96,7 +96,7 @@ auto extract_value(istringstream &lineStream, Callback cb, bool mapping, Args&&.
     if(mapping)
         value.erase(remove(value.begin(), value.end(), ' '), value.end());
 
-    return cb(value, forward<Args>(args)...);
+    return cb(value, std::forward<Args>(args)...);
 }
 
 void save_reflectances(ifstream& file, float* reflectances, ENVI_properties& properties, bool asc_order, int wavelengths_scale_factor){

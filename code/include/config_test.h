@@ -2,6 +2,7 @@
 #define CONFIG_TEST_H
 
 #include <Analyzer_tools.h>
+#include <Functors.h>
 #include <string>
 
 ////////////GENERAL DATA////////////
