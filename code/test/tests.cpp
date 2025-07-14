@@ -9,12 +9,17 @@ ENVI_reader::ENVI_properties envi_properties;
 Analyzer_tools::Analyzer_properties analyzer_properties;
 float* img = nullptr;
 float* spectrums = nullptr;
+float* img_d = nullptr;
+float* spectrums_d = nullptr;
 string* names = nullptr;
+sycl::queue device_q;
 
 void free_resources() {
     free(img);
     free(spectrums);
     delete[] names;
+    sycl::free(img_d, device_q);
+    sycl::free(spectrums_d, device_q);
 }
 
 exit_code write_test_img_bil(){
@@ -43,7 +48,7 @@ exit_code write_test_img_bil(){
 template<typename Callback, typename... Args>
 void test(Callback do_test, const string str, int &tests_passed, int &tests_done, Args&&... args){
     tests_done++;
-    exit_code code = do_test(forward<Args>(args)...);
+    exit_code code = do_test(std::forward<Args>(args)...);
     cout << "#" << tests_done << " Testing: "  << str << " = " << TEST_RESULTS[code] << endl;;
     if (!code)
         tests_passed++;
@@ -197,6 +202,84 @@ void spectrums_tests(int& tests_done, int& tests_passed) {
     test(test_spectrums_read_correct, "read spectrums correctly", tests_passed, tests_done);
 }
 
+//////////////////////////////SYCL TESTS///////////////////////////////
+exit_code test_scale_img_USM() {
+    size_t img_size = envi_properties.get_image_size();
+    img_d = sycl::malloc_device<float>(img_size, device_q);
+    spectrums_d = sycl::malloc_device<float>(envi_properties.bands * N_TEST_SPECTRUM_FILES, device_q);
+    float* result_img = (float*)malloc(img_size * sizeof(float));
+
+    device_q.memcpy(img_d, img, img_size * sizeof(float));
+    sycl::event copied = device_q.memcpy(spectrums_d, spectrums, envi_properties.bands * N_TEST_SPECTRUM_FILES);
+    Functors::USM::ImgScaler imgScaler(img_d, envi_properties.reflectance_scale_factor);
+    optional<sycl::event> opt_copied(copied);
+
+    sycl::event scaled = Analyzer_tools::launch_kernel_USM(device_q, imgScaler, img_size, opt_copied);
+    scaled.wait();
+
+    device_q.memcpy(result_img, img_d, img_size * sizeof(float)).wait();
+
+    float epsilon = 0.00001, test_sample, calculated_sample;
+    size_t full_line_bands = envi_properties.bands * envi_properties.samples, samples = envi_properties.samples, bands = envi_properties.bands;
+    for(size_t i = 0; i < img_size; i++) {
+        test_sample = (float)TESTING_IMG[ ((i%samples) * bands) + ((i/samples)%bands) + ((i/full_line_bands) * full_line_bands) ] / (float)TEST_REFLECTANCE_SCALE_FACTOR;
+        calculated_sample = result_img[i];
+
+        if (!(fabs(test_sample - calculated_sample) < epsilon))
+            return EXIT_FAILURE;
+    }
+    free(result_img);
+
+    return EXIT_SUCCESS;
+}
+
+exit_code test_scale_img_acc() {
+    size_t img_size = envi_properties.get_image_size();
+    sycl::range<1> range(img_size);
+    float* test_img = (float*)malloc(img_size * sizeof(float));
+    memcpy(test_img, img, img_size * sizeof(float));
+
+    sycl::buffer<float, 1> buf(test_img, range);
+
+    device_q.submit([&](sycl::handler& h) {
+
+        sycl::accessor<float, 1, sycl::access_mode::read_write> img_acc = buf.get_access<sycl::access::mode::read_write>(h);
+        struct Functors::Accessors::ImgScaler f(img_acc, envi_properties.reflectance_scale_factor);
+        
+        h.parallel_for(range, f);
+    }).wait();
+
+    float epsilon = 0.00001, test_sample, calculated_sample;
+    size_t full_line_bands = envi_properties.bands * envi_properties.samples, samples = envi_properties.samples, bands = envi_properties.bands;
+    for(size_t i = 0; i < img_size; i++) {
+        test_sample = (float)TESTING_IMG[ ((i%samples) * bands) + ((i/samples)%bands) + ((i/full_line_bands) * full_line_bands) ] / (float)TEST_REFLECTANCE_SCALE_FACTOR;
+        calculated_sample = test_img[i];
+
+        if (!(fabs(test_sample - calculated_sample) < epsilon))
+            return EXIT_FAILURE;
+    }
+    free(test_img);
+
+    return EXIT_SUCCESS;
+}
+
+exit_code test_initializa_SYCL_queue() { return Analyzer_tools::initialize_SYCL_queue(analyzer_properties, device_q); }
+
+exit_code test_initialize_default_SYCL_queue() {
+    analyzer_properties.device = Analyzer_tools::ACCELERATOR;
+    sycl::queue test_q;
+    exit_code code = Analyzer_tools::initialize_SYCL_queue(analyzer_properties, test_q);
+    analyzer_properties.device = Analyzer_tools::DEFAULT;
+    return code;
+}
+
+void sycl_tests(int& tests_done, int& tests_passed) {
+    test(test_initializa_SYCL_queue, "initialize SYCL queue", tests_passed, tests_done);
+    test(test_initialize_default_SYCL_queue, "initialize SYCL default queue when selected is not available", tests_passed, tests_done);
+    test(test_scale_img_USM, "scale the image to normalize with USM", tests_passed, tests_done);
+    test(test_scale_img_acc, "scale the image to normalize with accessors", tests_passed, tests_done);
+}
+
 
 /////////////////////////////////MAIN//////////////////////////////////
 int main(int argc, char **argv){
@@ -210,6 +293,7 @@ int main(int argc, char **argv){
     hdr_tests(tests_done, tests_passed);
     img_tests(tests_done, tests_passed);
     spectrums_tests(tests_done, tests_passed);
+    sycl_tests(tests_done, tests_passed);
 
     if (tests_passed != tests_done)
         cout << "\033[31mThe number of tests passed is lower than the tests done: \033[0m" << "Tests passed: " << tests_passed << " < " "Tests done: " << tests_done << endl;

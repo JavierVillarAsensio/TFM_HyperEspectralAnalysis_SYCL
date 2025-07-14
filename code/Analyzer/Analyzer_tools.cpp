@@ -15,6 +15,7 @@ const unordered_map<string, Analyzer_algorithms> algorithms_mapper {
 const unordered_map<string, Analyzer_devices> devices_mapper {
     {"GPU", GPU},
     {"CPU", CPU},
+    {"ACCELERATOR", ACCELERATOR},
     {"DEFAULT", DEFAULT}
 };
 
@@ -23,7 +24,7 @@ value map(const string key, unordered_map<string, value> mapper){
     typename unordered_map<string, value>::const_iterator mapped = mapper.find(key);
 
     if(mapped == mapper.end())
-        throw runtime_error("Error reading analyzer options. Could not find a valid option for \"" + key + "\"");
+        throw runtime_error("ERROR: Error reading analyzer options. Could not find a valid option for \"" + key + "\"");
     else
         return mapped->second;
 }
@@ -60,11 +61,11 @@ namespace Analyzer_tools {
                 }
 
         if (!p.image_hdr_folder_path) {
-            cerr << "Error. No path was given for the image and the .hdr file." << endl;
+            cerr << "ERROR: No path was given for the image and the .hdr file." << endl;
             return p;
         }
         else if (!p.specrums_folder_path) {
-            cerr << "Error. No path was given for the spectrums." << endl;
+            cerr << "ERROR: No path was given for the spectrums." << endl;
             return p;
         }
 
@@ -82,7 +83,7 @@ namespace Analyzer_tools {
                     contador += count_spectrums(entry.path().string().c_str());
             }
         } catch (const filesystem::filesystem_error& e) {
-            cerr << "Error, could not open spectrums in folder \"" << path << "\"" << endl;
+            cerr << "ERROR: Could not open spectrums in folder \"" << path << "\"" << endl;
         }
 
         return contador;
@@ -112,9 +113,54 @@ namespace Analyzer_tools {
                         return path.string();
                     }
         } catch (const filesystem::filesystem_error& e) {
-            cerr << "Error, could not find directory \"" << directory << "\"" << endl;
+            cerr << "ERROR: Could not find directory \"" << directory << "\"" << endl;
             return "";
         }
         return "";      
+    }
+
+    exit_code initialize_SYCL_queue(Analyzer_tools::Analyzer_properties& properties, sycl::queue& q) {
+        try {
+            switch (properties.device) {
+                case Analyzer_tools::CPU:
+                    q = sycl::queue([](const sycl::device& dev) {
+                        return dev.is_cpu();
+                    });
+                    break;
+
+                case Analyzer_tools::GPU:
+                    q = sycl::queue([](const sycl::device& dev) {
+                        return dev.is_gpu();
+                    });
+                    break;
+
+                case Analyzer_tools::ACCELERATOR:
+                    q = sycl::queue([](const sycl::device& dev) {
+                        return dev.is_accelerator();
+                    });
+                    break;
+
+                case Analyzer_tools::DEFAULT:
+                default:
+                    q = sycl::queue();
+                    break;
+            }
+        } catch (const sycl::exception& e) {
+            cout << "WARNING: The given selector is not available, default selector will be used" << endl;
+            try {
+                q = sycl::queue();
+            } catch (const sycl::exception& e) {
+                cerr << "ERROR: It is not posible to use the default selector. Aborting..." << endl;
+                return EXIT_FAILURE;
+            }
+        }
+
+        properties.ND_max_item_work_group_size = q.get_device().get_info<sycl::info::device::max_work_group_size>();
+        if(properties.ND_max_item_work_group_size > 1)
+            properties.ND_kernel = true;
+        if(q.get_device().has(sycl::aspect::usm_device_allocations))
+            properties.USM = true;
+
+        return EXIT_SUCCESS;
     }
 }
