@@ -15,6 +15,8 @@
 
 #define FLOAT_MAX 3.4028235e+38
 
+constexpr const size_t SCALER_N_VARIANTS = 1;
+constexpr const size_t ANALYZERS_N_VARIANTS = 3;
 
 constexpr const char* help_message = "These are the options to execute the program:\n"
                                         "\t-h Shows this message\n"
@@ -84,6 +86,21 @@ namespace Analyzer_tools {
         }(std::make_index_sequence<N_ACCESSES>{});
     }
 
+
+    /**
+     * @brief launches a SYCL kernel with the given Data_access and Args
+     * 
+     * Depending on the data type of the variants array launches a kernel with USM or creating
+     * the sycl accessors for the buffers, the array of variants HAS TO have the same data type
+     * of variants "variant<float*, sycl::buffer<float, 1>>" and each of the variants HAS TO
+     * encapsulate the same data type.
+     * 
+     * @param devie_q SYCL queue where the kernel will be launched
+     * @param range SYCL range of for the kernel
+     * @param opt_dependecy optional dependency for the kernel to wait
+     * @param variants array of variants encapsulating the accesses to the data in the device (rvalue)
+     * @param args... pack of arguments needed in the functor constructor
+     */
     template<
         template <typename> typename Functor,
         typename Range_type,
@@ -108,21 +125,10 @@ namespace Analyzer_tools {
                         h.depends_on(opt_dependency.value());
 
                     if constexpr (std::is_same_v<Data_access_type, float*>) {
-
-                        if (N_VARIANTS == 3) {
-                            float* img = accesses[0];
-                            sycl::ext::oneapi::experimental::printf("img: %f %f %f %f %f %f %f %f %f %f %f %f \n", img[0], img[1], img[2], img[3], img[4], img[5], img[6], img[7], img[8], img[9], img[10], img[11]);
-
-                            float* specs = accesses[1];
-                            sycl::ext::oneapi::experimental::printf("spec: %f %f %f %f\n", specs[0], specs[1], specs[2], specs[3]);
-
-                            float* res = accesses[2];
-                            sycl::ext::oneapi::experimental::printf("res: %f %f %f %f %f %f\n", res[0], res[1], res[2], res[3], res[4], res[5]);
-                        }
-
                         Functor<float*> f =  create_functor<Functor, Data_access_type, N_VARIANTS>(accesses, std::forward<Args>(args)...);
                         h.parallel_for(range, f);
                     }
+
                     else if constexpr (std::is_same_v<Data_access_type, sycl::buffer<float, 1>>) {
                         std::array<sycl::accessor<float, 1, sycl::access::mode::read_write, sycl::access::target::device>, N_VARIANTS> accessors_arr{};
                         for(size_t access_index = 0; access_index < N_VARIANTS; access_index++)

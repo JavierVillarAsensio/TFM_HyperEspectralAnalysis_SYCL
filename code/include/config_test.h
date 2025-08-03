@@ -38,6 +38,7 @@ constexpr short int TESTING_IMG[TEST_BANDS * TEST_SAMPLES * TEST_LINES] = {
     800, 1200,   1900, 2100,   900, 1100
 };
 const size_t TESTING_IMG_N_ELEMENTS = sizeof(TESTING_IMG) / sizeof(short int);
+const size_t IMG_2D_SIZE = TEST_SAMPLES * TEST_LINES;
 
 ////////////SPECTRUMS DATA////////////
 constexpr float TEST_SPECTRUMS_CORRECT_REFLECTANCES[N_TEST_SPECTRUM_FILES] = {10.0, 20.0};
