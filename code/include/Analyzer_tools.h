@@ -2,12 +2,18 @@
 #define ANALYZER_TOOLS_H
 
 #include <ENVI_reader.h>
+#include <Functors.h>
 #include <string>
 #include <sycl/sycl.hpp>
 #include <optional>
+#include <tuple>
+#include <utility>
+#include <array>
 
 #define HDR_FILE_EXTENSION ".hdr"
-#define IMG_FILE_EXTENSION ".img" 
+#define IMG_FILE_EXTENSION ".img"
+
+#define FLOAT_MAX 3.4028235e+38
 
 
 constexpr const char* help_message = "These are the options to execute the program:\n"
@@ -41,8 +47,10 @@ namespace Analyzer_tools {
         Analyzer_algorithms algorithm = EUCLIDEAN;
         Analyzer_devices device = DEFAULT;
         bool ND_kernel = false;
-        int ND_max_item_work_group_size = 1;
-        bool USM = false;
+        size_t device_local_memory = 0;
+        size_t coalescent_read_size = 1;
+        bool USE_ACCESSORS = false;
+        size_t ND_max_item_work_group_size = 1;
     };                           
 
     Analyzer_properties initialize_analyzer(int argc, char** argv);
@@ -50,97 +58,88 @@ namespace Analyzer_tools {
     exit_code read_spectrums(const char* path, float* spectrums, std::string* names, ENVI_reader::ENVI_properties& properties, int* spectrums_index );
     std::string get_filename_by_extension(const char* directory, const char* file_extension);
     exit_code initialize_SYCL_queue(Analyzer_tools::Analyzer_properties& properties, sycl::queue& q);
+    exit_code copy_to_device(bool use_accessors, sycl::queue& device_q, std::variant<float*, sycl::buffer<float, 1>>& ptr_d, float* ptr_h, size_t copy_size, std::optional<sycl::event>* copied = nullptr);
+    exit_code copy_from_device(bool use_accessors, sycl::queue& device_q, std::variant<float*, sycl::host_accessor<float>>& ptr_h, std::variant<float*, sycl::buffer<float, 1>>& ptr_d, size_t copy_size, std::optional<sycl::event>* copied = nullptr);
 
-    /**
-     * @brief launchs a kernel of the given functor for devices with USM
-     * 
-     * Checks if there is a dependency to satisfy and launches a kernel of the given functor, with the given size on the given queue.
-     * 
-     * @param q reference to the queue attached to the device
-     * @param f functor to be executed as kernel
-     * @param size size of the parallelism
-     * @param opt_dependency dependency of the task optional
-     */
-    template<typename Functor>
-    sycl::event launch_kernel_USM(sycl::queue& q, Functor f, size_t size, std::optional<sycl::event> opt_dependency) {
-        sycl::event launch_event;
-        sycl::range<1> range(size);
-
-        launch_event = q.submit([&](sycl::handler& h) {
-        if(opt_dependency.has_value())
-            h.depends_on(opt_dependency.value());    
-        
-        h.parallel_for(range, f);
-        });
-
-        return launch_event;
+    template<
+        template <typename> typename Functor,
+        typename Data_access_type,
+        size_t N_VARIANTS,
+        typename... Args
+    >
+    Functor<Data_access_type> create_functor(std::array<Data_access_type, N_VARIANTS>& arr, Args&&... args){
+        return [&]<size_t... Indexes>(std::index_sequence<Indexes...>) {
+            return Functor<Data_access_type> ( arr[Indexes]..., std::forward<Args>(args)... );
+        }(std::make_index_sequence<N_VARIANTS>{});
     }
 
-    /**
-     * @brief launchs a kernel of the given functor for devices with USM
-     * 
-     * Checks if there is a dependency to satisfy and launches a kernel of the given functor, with the given size on the given queue.
-     * This launches a kernel that should be prepared for nd_range.
-     * 
-     * @param q reference to the queue attached to the device
-     * @param f functor to be executed as kernel
-     * @param size size of the parallelism
-     * @param opt_dependency dependency of the task optional
-     * @param range sycl nd_range object, its N value has to be known in compilation time
-     */
-    template<typename Functor, int N>
-    sycl::event launch_kernel_USM(sycl::queue& q, Functor f, size_t size, std::optional<sycl::event> opt_dependency, sycl::nd_range<N> range) {
-        sycl::event launch_event;
-
-        launch_event = q.submit([&](sycl::handler& h) {
-        if(opt_dependency.has_value())
-            h.depends_on(opt_dependency.value());    
-        
-        h.parallel_for(range, f);
-        });
-
-        return launch_event;
+    template <
+        typename Data_access_type,
+        size_t N_ACCESSES,
+        typename ArrayType
+    >
+    std::array<Data_access_type, N_ACCESSES> create_array(ArrayType& arr) {
+        return [&]<std::size_t... Indexes>(std::index_sequence<Indexes...>) {
+            return std::array<Data_access_type, N_ACCESSES>{ std::get<Data_access_type>(std::forward<ArrayType>(arr)[Indexes])... };
+        }(std::make_index_sequence<N_ACCESSES>{});
     }
 
-    /**
-     * @brief launchs a kernel of the given functor for devices without USM
-     * 
-     * Checks if there is a dependency to satisfy and launches a kernel with the templated functor, with the given size on the given queue.
-     * 
-     * @param q reference to the queue attached to the device
-     * @param img_buf reference to the buffer with the image
-     * @param spectrums_buf reference to the buffer with the spectrums
-     * @param results_buf reference to the buffer where results will be stored
-     * @param size size of the parallelism
-     * @param opt_dependency dependency of the task optional
-     */
-    template<typename Functor>
-    sycl::event launch_kernel_acc(sycl::queue& q, 
-                                  sycl::buffer<float, 1>& img_buf,
-                                  sycl::buffer<float, 1>& spectrums_buf,
-                                  sycl::buffer<float, 1>& results_buf,
-                                  size_t size, 
-                                  std::optional<sycl::event> opt_dependency) {
+    template<
+        template <typename> typename Functor,
+        typename Range_type,
+        size_t N_VARIANTS, 
+        typename... Args
+    >
+    sycl::event launch_kernel(sycl::queue& device_q, 
+                                            Range_type range, 
+                                            std::optional<sycl::event>& opt_dependency,
+                                            std::array<std::variant<float*, sycl::buffer<float, 1>>, N_VARIANTS>&& variants, 
+                                            Args&&... args) {
 
-        sycl::event launch_event;
-        sycl::range<1> range(size);
+        sycl::event return_event;
 
-        launch_event = q.submit([&](sycl::handler& h) {
-            if(opt_dependency.has_value())
-                h.depends_on(opt_dependency.value());
+        std::visit([&](auto&& first) {
+            using Data_access_type = std::decay_t<decltype(first)>;
+            std::array<Data_access_type, N_VARIANTS> accesses = create_array<Data_access_type, N_VARIANTS, std::array<std::variant<float*, sycl::buffer<float, 1>>, N_VARIANTS>>(variants);
 
-            sycl::accessor<float, 1, sycl::access_mode::read_write> img_acc = img_buf.get_access<sycl::access::mode::read_write>(h);
-            sycl::accessor<float, 1, sycl::access_mode::read> spectrums_acc = spectrums_buf.get_access<sycl::access::mode::read>(h);
-            sycl::accessor<float, 1, sycl::access_mode::read_write> results_acc = results_buf.get_access<sycl::access::mode::read_write>(h);
+            try {
+                return_event = device_q.submit([&](sycl::handler& h) {
+                    if(opt_dependency.has_value())
+                        h.depends_on(opt_dependency.value());
 
-            Functor f(img_acc, spectrums_acc, results_acc);
-            
-            h.parallel_for(range, f);
-        });
+                    if constexpr (std::is_same_v<Data_access_type, float*>) {
 
-        return launch_event;
+                        if (N_VARIANTS == 3) {
+                            float* img = accesses[0];
+                            sycl::ext::oneapi::experimental::printf("img: %f %f %f %f %f %f %f %f %f %f %f %f \n", img[0], img[1], img[2], img[3], img[4], img[5], img[6], img[7], img[8], img[9], img[10], img[11]);
+
+                            float* specs = accesses[1];
+                            sycl::ext::oneapi::experimental::printf("spec: %f %f %f %f\n", specs[0], specs[1], specs[2], specs[3]);
+
+                            float* res = accesses[2];
+                            sycl::ext::oneapi::experimental::printf("res: %f %f %f %f %f %f\n", res[0], res[1], res[2], res[3], res[4], res[5]);
+                        }
+
+                        Functor<float*> f =  create_functor<Functor, Data_access_type, N_VARIANTS>(accesses, std::forward<Args>(args)...);
+                        h.parallel_for(range, f);
+                    }
+                    else if constexpr (std::is_same_v<Data_access_type, sycl::buffer<float, 1>>) {
+                        std::array<sycl::accessor<float, 1, sycl::access::mode::read_write, sycl::access::target::device>, N_VARIANTS> accessors_arr{};
+                        for(size_t access_index = 0; access_index < N_VARIANTS; access_index++)
+                            accessors_arr[access_index] = sycl::accessor<float, 1, sycl::access::mode::read_write, sycl::access::target::device> {accesses[access_index], h};
+
+                        Functor<sycl::accessor<float, 1, sycl::access::mode::read_write, sycl::access::target::device>> f =  
+                            create_functor<Functor, sycl::accessor<float, 1, sycl::access::mode::read_write, sycl::access::target::device>, N_VARIANTS>(accessors_arr, std::forward<Args>(args)...);
+                        h.parallel_for(range, f);
+                    }
+                });
+            } catch (const sycl::exception &e) {
+                std::cerr << "Error when launching SYCL kernel, error message: " << e.what() << std::endl;
+            }
+        }, variants[0]);
+
+        return return_event;
     }
-
 }
 
 #endif

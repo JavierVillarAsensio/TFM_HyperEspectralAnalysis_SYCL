@@ -37,7 +37,7 @@ using namespace ENVI_reader;
 
 
 //constant variables
-const unordered_map<string, int> data_type_mapper = {  //missing types not implemented
+const unordered_map<string, size_t> data_type_mapper = {  //missing types not implemented
     {"1",  1},    //8-bit unsigned int
     {"2",  2},    //16-bit signed int
     {"3",  4},    //32-bit signed int
@@ -72,7 +72,8 @@ const unordered_map<string, Interleave> interleave_mapper = {
 
 
 //struct functions
-size_t ENVI_properties::get_image_size() const noexcept { return samples * lines * bands; }
+size_t ENVI_properties::get_image_3Dsize() const noexcept { return samples * lines * bands; }
+size_t ENVI_properties::get_image_2Dsize() const noexcept { return samples * lines; }
 ENVI_properties::~ENVI_properties() noexcept { free(wavelengths); }
 
 
@@ -264,7 +265,7 @@ namespace ENVI_reader {
             return EXIT_FAILURE;
         }
 
-        size_t image_size_3D = properties->get_image_size(), data_size = properties->data_type_size, index = 0;
+        size_t image_size_3D = properties->get_image_3Dsize(), data_size = properties->data_type_size, index = 0;
 
         streamsize file_size = file.tellg();
         file.seekg(0, ios::beg);
@@ -292,8 +293,6 @@ namespace ENVI_reader {
 
         return EXIT_SUCCESS;
     }
-
-
 
     /**
      * @brief Reads reflectances of a spectrum file

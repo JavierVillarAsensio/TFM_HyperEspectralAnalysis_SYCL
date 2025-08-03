@@ -2,24 +2,27 @@
 #include <iostream>
 #include <fstream>
 #include <cmath>
+#include <array>
 
 using namespace std;
 
 ENVI_reader::ENVI_properties envi_properties;
 Analyzer_tools::Analyzer_properties analyzer_properties;
-float* img = nullptr;
-float* spectrums = nullptr;
-float* img_d = nullptr;
-float* spectrums_d = nullptr;
+float* img_h = nullptr;
+float* spectrums_h = nullptr;
+float* results_h = nullptr;
+variant<float*, sycl::buffer<float, 1>> img_d;
+variant<float*, sycl::buffer<float, 1>> spectrums_d;
 string* names = nullptr;
 sycl::queue device_q;
+optional<sycl::event> copied_event;
 
 void free_resources() {
-    free(img);
-    free(spectrums);
+    free(img_h);
+    free(spectrums_h);
     delete[] names;
-    sycl::free(img_d, device_q);
-    sycl::free(spectrums_d, device_q);
+    sycl::free(get<float*>(img_d), device_q);
+    sycl::free(get<float*>(spectrums_d), device_q);
 }
 
 exit_code write_test_img_bil(){
@@ -92,10 +95,7 @@ void analyzer_tests(int& tests_done, int& tests_passed, int argc, char* argv[]) 
 ///////////////////////////////HDR TESTS///////////////////////////////
 exit_code test_read_hdr(const char *filename) { return ENVI_reader::read_hdr(filename, &envi_properties); }
 
-exit_code test_read_fake_hdr(const char *filename) {
-    ENVI_reader::ENVI_properties bad_properties;
-    return ENVI_reader::read_hdr(filename, &bad_properties) ? EXIT_SUCCESS : EXIT_FAILURE;
-}
+exit_code test_read_fake_hdr(const char *filename) { return ENVI_reader::read_hdr(filename, nullptr) ? EXIT_SUCCESS : EXIT_FAILURE; }
 
 exit_code test_check_wrong_hdr() {
     int temp_samples = envi_properties.samples;
@@ -138,10 +138,11 @@ void hdr_tests(int& tests_done, int& tests_passed){
     test(test_check_correct_values_of_hdr, "check the .hdr values are read correctly", tests_passed, tests_done);
 }
 
+
 ///////////////////////////////IMG TESTS///////////////////////////////
 exit_code test_read_img_bil() {
-    img = (float*)malloc(envi_properties.get_image_size() * sizeof(float));
-    return ENVI_reader::read_img_bil(img, &envi_properties, TEST_IMG_FILE_PATH);
+    img_h = (float*)malloc(envi_properties.get_image_3Dsize() * sizeof(float));
+    return ENVI_reader::read_img_bil(img_h, &envi_properties, TEST_IMG_FILE_PATH);
 }
 
 exit_code test_read_nonexistent_img() { return ENVI_reader::read_img_bil(nullptr, &envi_properties, "a") ? EXIT_SUCCESS : EXIT_FAILURE; }
@@ -157,8 +158,8 @@ exit_code test_img_read_correct() {
     float epsilon = 0.00001;
     size_t full_line_bands = envi_properties.bands * envi_properties.samples, samples = envi_properties.samples, bands = envi_properties.bands;
     
-    for(size_t i = 0; i < envi_properties.get_image_size(); i++) 
-        if (!(fabs(TESTING_IMG[ ((i%samples) * bands) + ((i/samples)%bands) + ((i/full_line_bands) * full_line_bands) ] - img[i]) < epsilon))
+    for(size_t i = 0; i < envi_properties.get_image_3Dsize(); i++) 
+        if (!(fabs(TESTING_IMG[ ((i%samples) * bands) + ((i/samples)%bands) + ((i/full_line_bands) * full_line_bands) ] - img_h[i]) < epsilon))
             return EXIT_FAILURE;
 
     return EXIT_SUCCESS;
@@ -171,23 +172,24 @@ void img_tests(int& tests_done, int& tests_passed) {
     test(test_img_read_correct, "img read correctly", tests_passed, tests_done);
 }
 
+
 ////////////////////////////SPECTRUMS TESTS////////////////////////////
 exit_code test_count_spectrums() { return Analyzer_tools::count_spectrums(TEST_SPEC_FILE_PATH) == N_TEST_SPECTRUM_FILES ? EXIT_SUCCESS : EXIT_FAILURE; }
 
 exit_code test_count_spectrums_nonexistent_path() { return Analyzer_tools::count_spectrums("a") == 0 ? EXIT_SUCCESS : EXIT_FAILURE; }
 
 exit_code test_read_spectrums() {
-    spectrums = (float*)malloc(envi_properties.bands * N_TEST_SPECTRUM_FILES * sizeof(float));
+    spectrums_h = (float*)malloc(envi_properties.bands * N_TEST_SPECTRUM_FILES * sizeof(float));
     names = new string[N_TEST_SPECTRUM_FILES];
     int read_index = 0;
-    return Analyzer_tools::read_spectrums(TEST_SPEC_FILE_PATH, spectrums, names, envi_properties, &read_index);
+    return Analyzer_tools::read_spectrums(TEST_SPEC_FILE_PATH, spectrums_h, names, envi_properties, &read_index);
 }
 
 exit_code test_spectrums_read_correct() {
     float epsilon = 0.00001, diff10, diff20;
     for (size_t i = 0; i < envi_properties.bands * N_TEST_SPECTRUM_FILES; i++){
-        diff10 = fabs(spectrums[i] - TEST_SPECTRUMS_CORRECT_REFLECTANCES[0]);
-        diff20 = fabs(spectrums[i] - TEST_SPECTRUMS_CORRECT_REFLECTANCES[1]);
+        diff10 = fabs(spectrums_h[i] - TEST_SPECTRUMS_CORRECT_REFLECTANCES[0]);
+        diff20 = fabs(spectrums_h[i] - TEST_SPECTRUMS_CORRECT_REFLECTANCES[1]);
         if (!(diff10 < epsilon || diff20 < epsilon))
             return EXIT_FAILURE;
     }
@@ -202,27 +204,30 @@ void spectrums_tests(int& tests_done, int& tests_passed) {
     test(test_spectrums_read_correct, "read spectrums correctly", tests_passed, tests_done);
 }
 
+
 //////////////////////////////SYCL TESTS///////////////////////////////
+exit_code test_copy_USM() { return Analyzer_tools::copy_to_device(false, device_q, img_d, img_h, envi_properties.get_image_3Dsize(), &copied_event); }
+
 exit_code test_scale_img_USM() {
-    size_t img_size = envi_properties.get_image_size();
-    img_d = sycl::malloc_device<float>(img_size, device_q);
-    spectrums_d = sycl::malloc_device<float>(envi_properties.bands * N_TEST_SPECTRUM_FILES, device_q);
+    size_t img_size = envi_properties.get_image_3Dsize();
+    variant<float*, sycl::host_accessor<float>> result_img_var;
     float* result_img = (float*)malloc(img_size * sizeof(float));
+    result_img_var = result_img;
+    sycl::range<1> range(img_size);
 
-    device_q.memcpy(img_d, img, img_size * sizeof(float));
-    sycl::event copied = device_q.memcpy(spectrums_d, spectrums, envi_properties.bands * N_TEST_SPECTRUM_FILES);
-    Functors::USM::ImgScaler imgScaler(img_d, envi_properties.reflectance_scale_factor);
-    optional<sycl::event> opt_copied(copied);
-
-    sycl::event scaled = Analyzer_tools::launch_kernel_USM(device_q, imgScaler, img_size, opt_copied);
+    sycl::event scaled = Analyzer_tools::launch_kernel<Functors::ImgScaler, sycl::range<1>, 1>
+                                         (device_q, range, copied_event, array<variant<float*, sycl::buffer<float, 1>>, 1>{img_d}, envi_properties.reflectance_scale_factor);
     scaled.wait();
 
-    device_q.memcpy(result_img, img_d, img_size * sizeof(float)).wait();
+    Analyzer_tools::copy_from_device(false, device_q, result_img_var, img_d, img_size, &copied_event);
+    copied_event.value().wait();
+    result_img = get<float*>(result_img_var);
 
     float epsilon = 0.00001, test_sample, calculated_sample;
     size_t full_line_bands = envi_properties.bands * envi_properties.samples, samples = envi_properties.samples, bands = envi_properties.bands;
     for(size_t i = 0; i < img_size; i++) {
         test_sample = (float)TESTING_IMG[ ((i%samples) * bands) + ((i/samples)%bands) + ((i/full_line_bands) * full_line_bands) ] / (float)TEST_REFLECTANCE_SCALE_FACTOR;
+        test_sample *= 100;
         calculated_sample = result_img[i];
 
         if (!(fabs(test_sample - calculated_sample) < epsilon))
@@ -233,32 +238,38 @@ exit_code test_scale_img_USM() {
     return EXIT_SUCCESS;
 }
 
+exit_code test_copy_buff() {
+    variant<float*, sycl::buffer<float, 1>> buff;
+    return Analyzer_tools::copy_to_device(true, device_q, buff, img_h, envi_properties.get_image_3Dsize()); 
+}
+
 exit_code test_scale_img_acc() {
-    size_t img_size = envi_properties.get_image_size();
+    size_t img_size = envi_properties.get_image_3Dsize();
     sycl::range<1> range(img_size);
-    float* test_img = (float*)malloc(img_size * sizeof(float));
-    memcpy(test_img, img, img_size * sizeof(float));
+    variant<float*, sycl::buffer<float, 1>> img_d_buff;
+    variant<float*, sycl::host_accessor<float>> result_img_var;
+    sycl::host_accessor<float> result_img;
+    optional<sycl::event> copied_event;
 
-    sycl::buffer<float, 1> buf(test_img, range);
+    Analyzer_tools::copy_to_device(true, device_q, img_d_buff, img_h, img_size, &copied_event);
+    sycl::event scaled = Analyzer_tools::launch_kernel<Functors::ImgScaler, sycl::range<1>, 1>
+                                         (device_q, range, copied_event, array<variant<float*, sycl::buffer<float, 1>>, 1>{img_d_buff}, envi_properties.reflectance_scale_factor);
+    scaled.wait();
+    Analyzer_tools::copy_from_device(true, device_q, result_img_var, img_d_buff, img_size, &copied_event);
+    copied_event.value().wait();
 
-    device_q.submit([&](sycl::handler& h) {
-
-        sycl::accessor<float, 1, sycl::access_mode::read_write> img_acc = buf.get_access<sycl::access::mode::read_write>(h);
-        struct Functors::Accessors::ImgScaler f(img_acc, envi_properties.reflectance_scale_factor);
-        
-        h.parallel_for(range, f);
-    }).wait();
+    result_img = move(get<sycl::host_accessor<float>>(result_img_var));
 
     float epsilon = 0.00001, test_sample, calculated_sample;
     size_t full_line_bands = envi_properties.bands * envi_properties.samples, samples = envi_properties.samples, bands = envi_properties.bands;
     for(size_t i = 0; i < img_size; i++) {
         test_sample = (float)TESTING_IMG[ ((i%samples) * bands) + ((i/samples)%bands) + ((i/full_line_bands) * full_line_bands) ] / (float)TEST_REFLECTANCE_SCALE_FACTOR;
-        calculated_sample = test_img[i];
+        test_sample *= 100;
+        calculated_sample = result_img[i];
 
         if (!(fabs(test_sample - calculated_sample) < epsilon))
             return EXIT_FAILURE;
     }
-    free(test_img);
 
     return EXIT_SUCCESS;
 }
@@ -276,10 +287,50 @@ exit_code test_initialize_default_SYCL_queue() {
 void sycl_tests(int& tests_done, int& tests_passed) {
     test(test_initializa_SYCL_queue, "initialize SYCL queue", tests_passed, tests_done);
     test(test_initialize_default_SYCL_queue, "initialize SYCL default queue when selected is not available", tests_passed, tests_done);
+    test(test_copy_USM, "copy the image to device with USM", tests_passed, tests_done);
     test(test_scale_img_USM, "scale the image to normalize with USM", tests_passed, tests_done);
+    test(test_copy_buff, "copy the image to device with buffers", tests_passed, tests_done);
     test(test_scale_img_acc, "scale the image to normalize with accessors", tests_passed, tests_done);
 }
 
+
+/////////////////////////////KERNEL TESTS//////////////////////////////
+exit_code test_basic_USM_euclidean() {
+    size_t img_2Dsize = envi_properties.get_image_2Dsize();
+    size_t results_size = Functors::Euclidean<float*>::get_results_size(img_2Dsize, envi_properties.bands, N_TEST_SPECTRUM_FILES);
+    results_h = (float*)malloc(results_size * sizeof(float));
+    for(size_t i = 0; i < results_size; i++)
+        results_h[i] = FLOAT_MAX;
+    optional<sycl::event> copied;
+
+    sycl::range<1> range(Functors::Euclidean<float*>::get_range_size(img_2Dsize, envi_properties.bands, N_TEST_SPECTRUM_FILES));
+    variant<float*, sycl::buffer<float, 1>> results_d = sycl::malloc_device<float>(results_size, device_q);
+
+    Analyzer_tools::copy_to_device(false, device_q, spectrums_d, spectrums_h, N_TEST_SPECTRUM_FILES * envi_properties.bands, &copied);
+    copied.value().wait();
+    Analyzer_tools::copy_to_device(false, device_q, results_d, results_h, results_size, &copied);
+    const size_t n_variants = 3;
+    sycl::event kernel = Analyzer_tools::launch_kernel<Functors::Euclidean, sycl::range<1>, n_variants>
+        (device_q, range, copied, array<variant<float*, sycl::buffer<float, 1>>, n_variants> {img_d, spectrums_d, results_d},
+         N_TEST_SPECTRUM_FILES, envi_properties.lines, envi_properties.samples, envi_properties.bands);
+
+    kernel.wait();
+    float* result_img = (float*)malloc(2*img_2Dsize * sizeof(float));
+    variant<float*, sycl::host_accessor<float>> final_results_var = result_img;
+    Analyzer_tools::copy_from_device(false, device_q, final_results_var, results_d, 2*img_2Dsize, &copied);
+    copied.value().wait();
+
+    result_img = get<float*>(final_results_var);
+    for(int i = 0; i < 18; i++)
+        cout << i << ": " << result_img[i] << endl;
+    
+    free(result_img);
+    return EXIT_SUCCESS;
+}
+
+void kernel_tests(int& tests_done, int& tests_passed) {
+    test(test_basic_USM_euclidean, "basic USM euclidean kernel", tests_passed, tests_done);
+}
 
 /////////////////////////////////MAIN//////////////////////////////////
 int main(int argc, char **argv){
@@ -294,6 +345,7 @@ int main(int argc, char **argv){
     img_tests(tests_done, tests_passed);
     spectrums_tests(tests_done, tests_passed);
     sycl_tests(tests_done, tests_passed);
+    kernel_tests(tests_done, tests_passed);
 
     if (tests_passed != tests_done)
         cout << "\033[31mThe number of tests passed is lower than the tests done: \033[0m" << "Tests passed: " << tests_passed << " < " "Tests done: " << tests_done << endl;

@@ -16,16 +16,17 @@ namespace ENVI_reader {
     };
 
     struct ENVI_properties {
-        int samples = FAILURE;
-        int lines = FAILURE;
-        int bands = FAILURE;
-        int header_offset = FAILURE;
-        int data_type_size = FAILURE;
+        size_t samples = FAILURE;
+        size_t lines = FAILURE;
+        size_t bands = FAILURE;
+        size_t header_offset = FAILURE;
+        size_t data_type_size = FAILURE;
         enum Interleave interleave = FAILURE;
         int wavelength_unit;
-        float reflectance_scale_factor = FAILURE;
+        int reflectance_scale_factor = FAILURE;
         float* wavelengths = nullptr;
-        size_t get_image_size() const noexcept;
+        size_t get_image_3Dsize() const noexcept;
+        size_t get_image_2Dsize() const noexcept;
         ~ENVI_properties() noexcept;
     };
 

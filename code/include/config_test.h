@@ -16,7 +16,7 @@ extern const std::string ERROR = "\033[31mERROR\033[0m";   // Red
 extern const std::string PASS  = "\033[32mPASS\033[0m";    // Green
 extern const std::string TEST_RESULTS[2] = {PASS, ERROR};
 
-constexpr int N_TEST_SPECTRUM_FILES  = 2;
+constexpr size_t N_TEST_SPECTRUM_FILES  = 2;
 
 typedef int exit_code;
 

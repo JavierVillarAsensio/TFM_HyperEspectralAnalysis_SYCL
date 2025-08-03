@@ -7,7 +7,7 @@ using namespace std;
 template<typename... Ptrs>
 void free_malloc_resources(sycl::event event, Ptrs... ptrs) { event.wait(); ( free(ptrs), ... ); }
 template<typename... Ptrs>
-void free_USM_resources(sycl::queue& q, Ptrs... ptrs) { (sycl::free(ptrs, q), ...); }
+void free_USM_resources(sycl::queue& q, Ptrs... ptrs) { (sycl::free(std::get<float*>(ptrs), q), ...); }
 
 exit_code initialize(Analyzer_tools::Analyzer_properties& analyzer_properties, sycl::queue& device_q, int argc, char** argv) {
     cout << "Reading program execution options..." << endl;
@@ -45,7 +45,7 @@ exit_code read_hdr(Analyzer_tools::Analyzer_properties& analyzer_properties, ENV
 
 exit_code read_hyperspectral(Analyzer_tools::Analyzer_properties& analyzer_properties, ENVI_reader::ENVI_properties& envi_properties, float*& img) {
     cout << "Reading hyperespectral image..." << endl;
-    img = (float*)malloc(envi_properties.get_image_size() * sizeof(float));
+    img = (float*)malloc(envi_properties.get_image_3Dsize() * sizeof(float));
 
     switch (envi_properties.interleave) {
         case ENVI_reader::Interleave::BIL: {
@@ -67,22 +67,6 @@ exit_code read_hyperspectral(Analyzer_tools::Analyzer_properties& analyzer_prope
             return EXIT_FAILURE;
     }
     cout << "Hyperespectral image read with no errors." << endl;
-    return EXIT_SUCCESS;
-}
-
-exit_code copy_hyperspectral_image(Analyzer_tools::Analyzer_properties& analyzer_properties, ENVI_reader::ENVI_properties& envi_properties, sycl::queue& device_q, 
-                                   float*& img, float*& img_d, sycl::event& img_copied, unique_ptr<sycl::buffer<float, 1>>& img_buff_ptr) {
-    size_t img_size = envi_properties.get_image_size();
-    size_t img_size_bytes = img_size * sizeof(float);
-
-    if(analyzer_properties.USM) {
-        img_d = sycl::malloc_device<float>(img_size_bytes, device_q);
-        img_buff_ptr.~unique_ptr();
-        img_copied = device_q.memcpy(img_d, img, img_size_bytes);
-    }
-    else
-        img_buff_ptr = make_unique<sycl::buffer<float, 1>>(img, sycl::range<1>(img_size));
-
     return EXIT_SUCCESS;
 }
 
@@ -110,44 +94,6 @@ exit_code read_spectrums(Analyzer_tools::Analyzer_properties& analyzer_propertie
     return EXIT_SUCCESS;
 }
 
-exit_code copy_spectrums(Analyzer_tools::Analyzer_properties& analyzer_properties, ENVI_reader::ENVI_properties& envi_properties, sycl::queue& device_q, 
-                         size_t n_spectrums, float*& spectrums, float*& spectrums_d, sycl::event& img_spectrums_copied, unique_ptr<sycl::buffer<float, 1>>& spectrums_buff_ptr) {
-    size_t spectrums_size = envi_properties.bands * n_spectrums;
-    size_t spectrums_size_bytes = spectrums_size * sizeof(float);
-
-    if (analyzer_properties.USM) {
-        spectrums_d = sycl::malloc_device<float>(spectrums_size_bytes, device_q);
-        spectrums_buff_ptr.~unique_ptr();
-    }
-    else
-        spectrums_buff_ptr = make_unique<sycl::buffer<float, 1>>(spectrums_size);
-
-    img_spectrums_copied = device_q.memcpy(spectrums_d, spectrums, spectrums_size_bytes);  //the q is FIFO so the img copy goes before
-    return EXIT_SUCCESS;
-}
-
-exit_code scale_img(Analyzer_tools::Analyzer_properties& analyzer_properties, ENVI_reader::ENVI_properties& envi_properties, sycl::queue& device_q, 
-                    float*& img_d, sycl::event& img_copied, sycl::event& img_scaled, unique_ptr<sycl::buffer<float, 1>>& img_buff_ptr) {
-    if(analyzer_properties.USM){
-        struct Functors::USM::ImgScaler scaler_functor(img_d, envi_properties.reflectance_scale_factor);
-        optional<sycl::event> opt_img_copied(img_copied);
-        img_scaled = Analyzer_tools::launch_kernel_USM(device_q, scaler_functor, envi_properties.get_image_size(), opt_img_copied);
-    }
-    else {
-        sycl::range<1> range(envi_properties.get_image_size());
-
-        img_scaled = device_q.submit([&](sycl::handler& h) {
-            h.depends_on(img_copied);
-
-            sycl::accessor<float, 1, sycl::access_mode::read_write> img_acc = (*img_buff_ptr).get_access<sycl::access::mode::read_write>(h);
-            struct Functors::Accessors::ImgScaler f(img_acc, envi_properties.reflectance_scale_factor);
-            
-            h.parallel_for(range, f);
-        });
-    }
-    return EXIT_SUCCESS;
-}
-
 int main(int argc, char* argv[]) {
     ////////////////////////////////Initialize////////////////////////////////
     Analyzer_tools::Analyzer_properties analyzer_properties;
@@ -155,10 +101,9 @@ int main(int argc, char* argv[]) {
     if(initialize(analyzer_properties, device_q, argc, argv))
         return EXIT_FAILURE;
 
-    float* img_d = nullptr;
-    float* spectrums_d = nullptr;
-    unique_ptr<sycl::buffer<float, 1>> img_buff_ptr;
-    unique_ptr<sycl::buffer<float, 1>> spectrums_buff_ptr;
+    variant<float*, sycl::buffer<float, 1>> img_d;
+    variant<float*, sycl::buffer<float, 1>> spectrums_d;
+    variant<float*, sycl::buffer<float, 1>> results_d;
 
 
     /////////////////////////////////Read .hdr////////////////////////////////
@@ -168,40 +113,48 @@ int main(int argc, char* argv[]) {
     
 
     ///////////////////////Read hyperspectral image//////////////////////////
-    float* img;
-    if(read_hyperspectral(analyzer_properties, envi_properties, img))
+    float* img_h;
+    if(read_hyperspectral(analyzer_properties, envi_properties, img_h))
         return EXIT_FAILURE;
 
 
     ///////////////////////Copy hyperspectral image//////////////////////////
-    sycl::event img_copied;
-    if(copy_hyperspectral_image(analyzer_properties, envi_properties, device_q, img, img_d, img_copied, img_buff_ptr))
+    optional<sycl::event> opt_img_copied;
+    if(Analyzer_tools::copy_to_device(analyzer_properties.USE_ACCESSORS, device_q, img_d, img_h, envi_properties.get_image_3Dsize(), &opt_img_copied))
         return EXIT_FAILURE;
     
 
     ////////////////////////////Read spectrums////////////////////////////////
     size_t n_spectrums;
-    float* spectrums;
+    float* spectrums_h;
     string* names;
-    if(read_spectrums(analyzer_properties, envi_properties, img, n_spectrums, spectrums, names))
+    if(read_spectrums(analyzer_properties, envi_properties, img_h, n_spectrums, spectrums_h, names))
         return EXIT_FAILURE;
 
 
     ////////////////////////////Copy spectrums////////////////////////////////
-    sycl::event img_spectrums_copied;
-    if(copy_spectrums(analyzer_properties, envi_properties, device_q, n_spectrums, spectrums, spectrums_d, img_spectrums_copied, spectrums_buff_ptr))
+    optional<sycl::event> opt_spectrums_copied;
+    if(Analyzer_tools::copy_to_device(analyzer_properties.USE_ACCESSORS, device_q, spectrums_d, spectrums_h, n_spectrums * envi_properties.bands, &opt_spectrums_copied))
         return EXIT_FAILURE;
 
 
     //////////////////////////////Scale img///////////////////////////////////
     sycl::event img_scaled;
-    if(scale_img(analyzer_properties, envi_properties, device_q, img_d, img_copied, img_scaled, img_buff_ptr))
-        return EXIT_FAILURE;
+    sycl::range<1> scaler_range(envi_properties.get_image_3Dsize());
+    Analyzer_tools::launch_kernel_with_variants<Functors::ImgScaler, sycl::range<1>, variant<float*, sycl::buffer<float, 1>>>
+                    (device_q, scaler_range, opt_spectrums_copied, img_d, envi_properties.reflectance_scale_factor);
 
-    img_spectrums_copied.wait();
-    free_malloc_resources(img_spectrums_copied, img, spectrums);
+    /////////////////////////////launch kernel////////////////////////////////
+    size_t results_size = envi_properties.samples * envi_properties.lines;
+    float* results_h = (float*)malloc(envi_properties.get_image_2Dsize() * sizeof(float));
+    for(int i = 0; i < results_size; i++) 
+        results_h[i] = 0;
+    
+
+    free_malloc_resources(opt_spectrums_copied.value(), img_h, spectrums_h, results_h);
     device_q.wait();
-    free_USM_resources(device_q, img_d, spectrums_d);
+    if(!analyzer_properties.USE_ACCESSORS)
+        free_USM_resources(device_q, img_d, spectrums_d);
 
     return EXIT_SUCCESS;
 }
