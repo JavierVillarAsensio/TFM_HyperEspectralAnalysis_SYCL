@@ -142,24 +142,24 @@ namespace ENVI_reader {
      * @param properties The struct to be checked
      * @return exit_code; -1 if FAILURE, 0 if EXIT_SUCCESS
      */
-    exit_code check_properties(const ENVI_properties* properties){
-        if (properties->wavelength_unit == FAILURE)
+    exit_code check_properties(const ENVI_properties& properties){
+        if (properties.wavelength_unit == FAILURE)
             return EXIT_FAILURE;
-        else if (properties->data_type_size == FAILURE)
+        else if (properties.data_type_size == FAILURE)
             return EXIT_FAILURE;
-        else if (properties->interleave == FAILURE)
+        else if (properties.interleave == FAILURE)
             return EXIT_FAILURE;
-        else if (properties->samples == FAILURE)
+        else if (properties.samples == FAILURE)
             return EXIT_FAILURE;
-        else if (properties->lines == FAILURE)
+        else if (properties.lines == FAILURE)
             return EXIT_FAILURE;
-        else if (properties->bands == FAILURE)
+        else if (properties.bands == FAILURE)
             return EXIT_FAILURE;
-        else if (properties->header_offset == FAILURE)
+        else if (properties.header_offset == FAILURE)
             return EXIT_FAILURE;
-        else if (properties->reflectance_scale_factor == FAILURE)
+        else if (properties.reflectance_scale_factor == FAILURE)
             return EXIT_FAILURE;
-        else if (properties->wavelengths == nullptr)
+        else if (properties.wavelengths == nullptr)
             return EXIT_FAILURE;
         else return EXIT_SUCCESS;
     }
@@ -174,7 +174,7 @@ namespace ENVI_reader {
      * @param ENVI_properties pointer to the struct where the properties will be written
      * @return exit_code type indicating EXIT_SUCCESS or EXIT_FAILURE
      */
-    exit_code read_hdr(const string filename, ENVI_reader::ENVI_properties* properties) {
+    exit_code read_hdr(const string filename, ENVI_reader::ENVI_properties& properties) {
         ifstream file(filename);
 
         if(!file.is_open() && !file.good()){
@@ -208,35 +208,35 @@ namespace ENVI_reader {
                                 waves_read = true;
                         }
                     }
-                    properties->wavelengths = (float*)malloc(properties->bands * sizeof(float));
-                    memcpy(properties->wavelengths, wavelengths, properties->bands * sizeof(float));
+                    properties.wavelengths = (float*)malloc(properties.bands * sizeof(float));
+                    memcpy(properties.wavelengths, wavelengths, properties.bands * sizeof(float));
                     free(wavelengths);
                 }
 
                 else if(key == CHANNELS_FIELD){
-                    properties->bands = extract_value(lineStream, stoi_wrapper, false);                
-                    wavelengths = (float*)malloc(sizeof(float) * properties->bands);
+                    properties.bands = extract_value(lineStream, stoi_wrapper, false);                
+                    wavelengths = (float*)malloc(sizeof(float) * properties.bands);
                 }
                 else if(key == ROWS_FIELD)
-                    properties->lines = extract_value(lineStream, stoi_wrapper, false);                
+                    properties.lines = extract_value(lineStream, stoi_wrapper, false);                
 
                 else if(key == COLS_FIELD)
-                    properties->samples = extract_value(lineStream, stoi_wrapper, false);                
+                    properties.samples = extract_value(lineStream, stoi_wrapper, false);                
 
                 else if(key == HEADER_OFFSET_FIELD)                    
-                    properties->header_offset = extract_value(lineStream, stoi_wrapper, false);
+                    properties.header_offset = extract_value(lineStream, stoi_wrapper, false);
 
                 else if(key == REFLECTANCE_SCALE_FACTOR_FIELD)
-                    properties->reflectance_scale_factor = extract_value(lineStream, stoi_wrapper, false);            
+                    properties.reflectance_scale_factor = extract_value(lineStream, stoi_wrapper, false);            
 
                 else if(key == WAVELENGTH_UNIT_FIELD)
-                    properties->wavelength_unit = extract_value(lineStream, map<decltype(properties->wavelength_unit)>, true, wavelength_unit_mapper, FAILURE);
+                    properties.wavelength_unit = extract_value(lineStream, map<decltype(properties.wavelength_unit)>, true, wavelength_unit_mapper, FAILURE);
 
                 else if(key == DATA_TYPE_FIELD)                    
-                    properties->data_type_size = extract_value(lineStream, map<decltype(properties->data_type_size)>, true, data_type_mapper, FAILURE);
+                    properties.data_type_size = extract_value(lineStream, map<decltype(properties.data_type_size)>, true, data_type_mapper, FAILURE);
 
                 else if(key == INTERLEAVE_FIELD)                                         
-                    properties->interleave = extract_value(lineStream, map<decltype(properties->interleave)>, true, interleave_mapper, Interleave::FAILURE);                
+                    properties.interleave = extract_value(lineStream, map<decltype(properties.interleave)>, true, interleave_mapper, Interleave::FAILURE);                
             }
         }
 
@@ -258,18 +258,18 @@ namespace ENVI_reader {
      * @param filename Path to the hiperespectral image
      * @return EXIT_SUCCESS or EXIT_FAILURE if any error is detected
      */
-    exit_code read_img_bil(float *img, const ENVI_properties* properties, const string filename) {
+    exit_code read_img_bil(float *img, const ENVI_properties& properties, const string filename) {
         ifstream file(filename, ios::binary | ios::ate);
         if(!file.is_open()){
             cerr << "Error opening the img file, it could not be opened." << endl;
             return EXIT_FAILURE;
         }
 
-        size_t image_size_3D = properties->get_image_3Dsize(), data_size = properties->data_type_size, index = 0;
+        size_t image_size_3D = properties.get_image_3Dsize(), data_size = properties.data_type_size, index = 0;
 
         streamsize file_size = file.tellg();
         file.seekg(0, ios::beg);
-        if (file_size != ((image_size_3D * data_size) + properties->header_offset)){
+        if (file_size != ((image_size_3D * data_size) + properties.header_offset)){
             cerr << "Error, the number of bytes of the image is not the expected" << endl;
             file.close();
             return EXIT_FAILURE;
@@ -277,7 +277,7 @@ namespace ENVI_reader {
 
         short int data;
         float refl;
-        streampos offset = streampos(properties->header_offset);
+        streampos offset = streampos(properties.header_offset);
         file.seekg(offset, ios::beg);
         while(index < image_size_3D) {
             file.read(reinterpret_cast<char*>(&data), data_size);

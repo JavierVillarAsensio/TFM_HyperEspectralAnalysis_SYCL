@@ -53,6 +53,7 @@ namespace Analyzer_tools {
         size_t coalescent_read_size = 1;
         bool USE_ACCESSORS = false;
         size_t ND_max_item_work_group_size = 1;
+        ENVI_reader::ENVI_properties envi_properties;
     };                           
 
     Analyzer_properties initialize_analyzer(int argc, char** argv);

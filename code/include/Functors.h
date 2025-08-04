@@ -23,11 +23,17 @@ namespace Functors {
                 : img_d(img_in), spectrums_d(spectrums_in), results_d(results_in), n_spectrums(n_spectrums_in), n_lines(n_lines_in), n_cols(n_cols_in), bands_size(bands_size_in) {}
                 
         BaseFunctor(Data_access img_in, Data_access spectrums_in, Data_access results_in, size_t n_spectrums_in, size_t n_lines_in, size_t n_cols_in, size_t bands_size_in, sycl::local_accessor<float, 1>* local_data_in, size_t coalesced_memory_width_in) 
-                : BaseFunctor(img_in, spectrums_in, results_in, n_spectrums_in, n_lines_in, n_cols_in, bands_size_in)
+                : img_d(img_in),
+                  spectrums_d(spectrums_in),
+                  results_d(results_in),
+                  n_spectrums(n_spectrums_in),
+                  n_lines(n_lines_in),
+                  n_cols(n_cols_in),
+                  bands_size(bands_size_in),
+                  local_data(local_data_in),
+                  coalesced_memory_width(coalesced_memory_width_in)
                 {
-                    local_memory = true;
-                    local_data = local_data_in;
-                    coalesced_memory_width = coalesced_memory_width_in;
+                    if(local_data) local_memory = true;
                 }
     };
     template<typename Data_access>
@@ -61,19 +67,8 @@ namespace Functors {
                   size_t n_cols_in,
                   size_t bands_size_in, 
                   sycl::local_accessor<float, 1> local_data_in, 
-                  size_t coalesced_memory_width_in, 
-                  size_t sums_per_work_item_in) 
+                  size_t coalesced_memory_width_in)
             : BaseFunctor<Data_access>(img_in, spectrums_in, results_in, n_spectrums_in, n_lines_in, n_cols_in, bands_size_in, local_data_in, coalesced_memory_width_in) {}
-
-        //basic kernel and nd-kernel without local memory
-        Euclidean(Data_access img_in, 
-                  Data_access spectrums_in, 
-                  Data_access results_in, 
-                  size_t n_spectrums_in,
-                  size_t n_lines_in,
-                  size_t n_cols_in,
-                  size_t bands_size_in) 
-            : BaseFunctor<Data_access>(img_in, spectrums_in, results_in, n_spectrums_in, n_lines_in, n_cols_in, bands_size_in) {}
 
         static size_t get_results_size(size_t image_2D_size, size_t n_bands, size_t n_spectrums) { return image_2D_size * 2; }
         static int get_range_size(size_t image_2D_size, size_t n_bands, size_t n_spectrums) { return image_2D_size * n_spectrums; }
@@ -97,7 +92,6 @@ namespace Functors {
                 diff = this->img_d[img_offset + (i * this->n_cols)] - this->spectrums_d[spectrum_offset + i];
                 sum += diff * diff;
             }
-
             
             //                                                                                                                                                    where the lowest value is stored
             sycl::atomic_ref<float, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> lowest_distance(this->results_d[img_2D_size + pixel_offset]);
@@ -110,8 +104,6 @@ namespace Functors {
                 }
                 read_distance = lowest_distance.load();
             }
-            
-            //this->results_d[wi_id] = sum;
         }
 
         /**
