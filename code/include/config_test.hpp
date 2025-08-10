@@ -1,8 +1,7 @@
 #ifndef CONFIG_TEST_H
 #define CONFIG_TEST_H
 
-#include <Analyzer_tools.h>
-#include <Functors.h>
+#include <Analyzer_tools.hpp>
 #include <string>
 
 ////////////GENERAL DATA////////////
@@ -32,10 +31,16 @@ const ENVI_reader::Interleave TEST_INTERLEAVE = ENVI_reader::BIL;
 constexpr float TEST_WAVELENGTHS[TEST_BANDS] = {2000.0, 4000.0};
 
 ////////////IMAGE DATA////////////
-constexpr short int TESTING_IMG[TEST_BANDS * TEST_SAMPLES * TEST_LINES] = {
+constexpr size_t TEST_IMG_SIZE = TEST_BANDS * TEST_SAMPLES * TEST_LINES;
+constexpr short int TESTING_IMG[TEST_IMG_SIZE] = {
     900, 1100,   1900, 2100,   800, 1200,
-    1800, 2200,   1000, 1000,   2000, 2000,
+    1800, 2200,  1000, 1000,   2000, 2000,
     800, 1200,   1900, 2100,   900, 1100
+};
+constexpr float TEST_SCALED_IMG[TEST_IMG_SIZE] = {
+    9, 11,   19, 21,   8, 12,
+    18, 22,  10, 10,   20, 20,
+    8, 12,   19, 21,   9, 11
 };
 const size_t TESTING_IMG_N_ELEMENTS = sizeof(TESTING_IMG) / sizeof(short int);
 const size_t IMG_2D_SIZE = TEST_SAMPLES * TEST_LINES;

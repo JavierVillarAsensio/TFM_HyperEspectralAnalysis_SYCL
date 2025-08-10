@@ -1,4 +1,4 @@
-#include <Analyzer_tools.h>
+#include <Analyzer_tools.hpp>
 #include <unordered_map>
 #include <iostream>
 #include <filesystem>
@@ -10,7 +10,6 @@ const unordered_map<string, Analyzer_algorithms> algorithms_mapper {
     {"EUCLIDEAN", EUCLIDEAN},
     {"CCM", CCM}
 };
-
 
 const unordered_map<string, Analyzer_devices> devices_mapper {
     {"GPU", GPU},
@@ -171,12 +170,13 @@ namespace Analyzer_tools {
 
         try {
             if(use_accessors) {
-                ptr_d = sycl::buffer<float, 1>(ptr_h, sycl::range<1>(copy_size));
+                ptr_d = sycl::buffer<float, 1>(ptr_h, ptr_h + copy_size);
                 if(copied)
                     *copied = device_q.submit([](sycl::handler& h) {});     //complete the event with a kernel with nothing 
             }
             else {
                 ptr_d = sycl::malloc_device<float>(copy_size, device_q);
+
                 if(copied)
                     *copied = device_q.memcpy(get<float*>(ptr_d), ptr_h, copy_size * sizeof(float));
                 else
@@ -197,7 +197,7 @@ namespace Analyzer_tools {
         try {
             if(use_accessors) {
                 sycl::host_accessor<float> temp_acc(get<sycl::buffer<float, 1>>(ptr_d));
-                ptr_h = move(temp_acc);
+                ptr_h = std::move(temp_acc);
                 if(copied)
                     *copied = device_q.submit([](sycl::handler& h) {});     //complete the event with a kernel with nothing 
             }

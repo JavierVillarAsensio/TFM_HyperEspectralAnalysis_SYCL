@@ -1,11 +1,9 @@
 /Test
 /Analyzer
 .vscode/
-errors.txt
-spectrums/2/*
-spectrums/3/*
-spectrums/4/*
+*.txt
+spectrums/2/
+spectrums/3/
+spectrums/4/
 spectrums/spectrums.csv
-/*.cpp
-/a.out
-/temp.txt
+code/object_files/

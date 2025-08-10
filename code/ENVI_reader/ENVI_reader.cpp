@@ -1,4 +1,4 @@
-#include <ENVI_reader.h>
+#include <ENVI_reader.hpp>
 #include <iostream>
 #include <fstream>
 #include <unordered_map>

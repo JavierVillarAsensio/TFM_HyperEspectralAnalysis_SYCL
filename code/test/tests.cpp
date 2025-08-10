@@ -1,4 +1,6 @@
-#include <config_test.h>
+#define INSTANTIATED
+
+#include <config_test.hpp>
 #include <iostream>
 #include <fstream>
 #include <cmath>
@@ -10,8 +12,8 @@ Analyzer_tools::Analyzer_properties analyzer_properties;
 float* img_h = nullptr;
 float* spectrums_h = nullptr;
 float* results_h = nullptr;
-variant<float*, sycl::buffer<float, 1>> img_d;
-variant<float*, sycl::buffer<float, 1>> spectrums_d;
+Analyzer_variant img_d;
+Analyzer_variant spectrums_d;
 string* names = nullptr;
 sycl::queue device_q;
 optional<sycl::event> copied_event;
@@ -31,9 +33,25 @@ void initialize_pointer(T* ptr, size_t ptr_size) {
 }
 
 exit_code check_result_img(float* ptr) {
-    for(size_t i = 0; i < IMG_2D_SIZE; i++)
+    int a,b;
+    for(size_t i = 0; i < IMG_2D_SIZE; i++) {
+        a = static_cast<int>(ptr[i]); 
         if(static_cast<int>(ptr[i]) % (i + 1))
             return EXIT_FAILURE;
+    }
+
+    return EXIT_SUCCESS;
+}
+
+template<typename T>
+exit_code check_scaled(T a) {
+    float epsilon = 0.0001;
+    size_t full_line_bands = TEST_BANDS * TEST_SAMPLES;
+
+    for(size_t i = 0; i < TEST_IMG_SIZE; i++) {
+        if(!(fabs(a[i] - TEST_SCALED_IMG[ ((i%TEST_SAMPLES) * TEST_BANDS) + ((i/TEST_SAMPLES)%TEST_BANDS) + ((i/full_line_bands) * full_line_bands) ]) < epsilon))
+            return EXIT_FAILURE;
+    }
 
     return EXIT_SUCCESS;
 }
@@ -184,7 +202,11 @@ void img_tests(int& tests_done, int& tests_passed) {
 
 
 ////////////////////////////SPECTRUMS TESTS////////////////////////////
-exit_code test_count_spectrums() { return Analyzer_tools::count_spectrums(TEST_SPEC_FILE_PATH) == N_TEST_SPECTRUM_FILES ? EXIT_SUCCESS : EXIT_FAILURE; }
+exit_code test_count_spectrums() { 
+    size_t n_spectrums = Analyzer_tools::count_spectrums(TEST_SPEC_FILE_PATH);
+    analyzer_properties.n_spectrums = n_spectrums;
+    return n_spectrums == N_TEST_SPECTRUM_FILES ? EXIT_SUCCESS : EXIT_FAILURE;
+}
 
 exit_code test_count_spectrums_nonexistent_path() { return Analyzer_tools::count_spectrums("a") == 0 ? EXIT_SUCCESS : EXIT_FAILURE; }
 
@@ -220,66 +242,45 @@ exit_code test_copy_USM() { return Analyzer_tools::copy_to_device(false, device_
 
 exit_code test_scale_img_USM() {
     size_t img_size = analyzer_properties.envi_properties.get_image_3Dsize();
-    variant<float*, sycl::host_accessor<float>> result_img_var;
-    float* result_img = (float*)malloc(img_size * sizeof(float));
-    result_img_var = result_img;
-    sycl::range<1> range(img_size);
+    Result_variant result_var;
+    float* result = sycl::malloc_host<float>(img_size, device_q);
+    result_var = result;
 
-    sycl::event scaled = Analyzer_tools::launch_kernel<Functors::ImgScaler, sycl::range<1>, SCALER_N_VARIANTS>
-                                         (device_q, range, copied_event, array<variant<float*, sycl::buffer<float, 1>>, 1>{img_d}, analyzer_properties.envi_properties.reflectance_scale_factor);
-    scaled.wait();
+    Analyzer_tools::launch_kernel<Functors::ImgScaler>(device_q, copied_event, analyzer_properties, array{img_d}, analyzer_properties.envi_properties.reflectance_scale_factor).wait();
 
-    Analyzer_tools::copy_from_device(false, device_q, result_img_var, img_d, img_size, &copied_event);
+    Analyzer_tools::copy_from_device(false, device_q, result_var, img_d, img_size, &copied_event);
     copied_event.value().wait();
-    result_img = get<float*>(result_img_var);
 
-    float epsilon = 0.00001, test_sample, calculated_sample;
-    size_t full_line_bands = analyzer_properties.envi_properties.bands * analyzer_properties.envi_properties.samples, samples = analyzer_properties.envi_properties.samples, bands = analyzer_properties.envi_properties.bands;
-    for(size_t i = 0; i < img_size; i++) {
-        test_sample = (float)TESTING_IMG[ ((i%samples) * bands) + ((i/samples)%bands) + ((i/full_line_bands) * full_line_bands) ] / (float)TEST_REFLECTANCE_SCALE_FACTOR;
-        test_sample *= 100;
-        calculated_sample = result_img[i];
+    float* result_copied = get<float*>(result_var);
+    exit_code ret = check_scaled(result_copied);
 
-        if (!(fabs(test_sample - calculated_sample) < epsilon))
-            return EXIT_FAILURE;
-    }
-    free(result_img);
+    sycl::free(result, device_q);
 
-    return EXIT_SUCCESS;
+    return ret;
 }
 
 exit_code test_copy_buff() {
-    variant<float*, sycl::buffer<float, 1>> buff;
+    Analyzer_variant buff;
     return Analyzer_tools::copy_to_device(true, device_q, buff, img_h, analyzer_properties.envi_properties.get_image_3Dsize()); 
 }
 
 exit_code test_scale_img_acc() {
     size_t img_size = analyzer_properties.envi_properties.get_image_3Dsize();
-    sycl::range<1> range(img_size);
-    variant<float*, sycl::buffer<float, 1>> img_d_buff;
-    variant<float*, sycl::host_accessor<float>> result_img_var;
+    Analyzer_variant img_d_buff;
+    Result_variant result_img_var;
     sycl::host_accessor<float> result_img;
-    optional<sycl::event> copied_event;
+    result_img_var = result_img;
 
     Analyzer_tools::copy_to_device(true, device_q, img_d_buff, img_h, img_size, &copied_event);
-    sycl::event scaled = Analyzer_tools::launch_kernel<Functors::ImgScaler, sycl::range<1>, SCALER_N_VARIANTS>
-                                         (device_q, range, copied_event, array<variant<float*, sycl::buffer<float, 1>>, 1>{img_d_buff}, analyzer_properties.envi_properties.reflectance_scale_factor);
-    scaled.wait();
+
+    Analyzer_tools::launch_kernel<Functors::ImgScaler>(device_q, copied_event, analyzer_properties, array{img_d_buff}, analyzer_properties.envi_properties.reflectance_scale_factor);
+    
     Analyzer_tools::copy_from_device(true, device_q, result_img_var, img_d_buff, img_size, &copied_event);
     copied_event.value().wait();
 
-    result_img = move(get<sycl::host_accessor<float>>(result_img_var));
+    result_img = std::move(get<sycl::host_accessor<float>>(result_img_var));
 
-    float epsilon = 0.00001, test_sample, calculated_sample;
-    size_t full_line_bands = analyzer_properties.envi_properties.bands * analyzer_properties.envi_properties.samples, samples = analyzer_properties.envi_properties.samples, bands = analyzer_properties.envi_properties.bands;
-    for(size_t i = 0; i < img_size; i++) {
-        test_sample = (float)TESTING_IMG[ ((i%samples) * bands) + ((i/samples)%bands) + ((i/full_line_bands) * full_line_bands) ] / (float)TEST_REFLECTANCE_SCALE_FACTOR;
-        test_sample *= 100;
-        calculated_sample = result_img[i];
-
-        if (!(fabs(test_sample - calculated_sample) < epsilon))
-            return EXIT_FAILURE;
-    }
+    exit_code ret = check_scaled(result_img);
 
     return EXIT_SUCCESS;
 }
@@ -306,28 +307,33 @@ void sycl_tests(int& tests_done, int& tests_passed) {
 
 /////////////////////////////KERNEL TESTS//////////////////////////////
 exit_code test_basic_USM_euclidean() {
+    
+    bool temp_ND = analyzer_properties.ND_kernel;
+    analyzer_properties.ND_kernel = false;
+
     size_t img_2Dsize = analyzer_properties.envi_properties.get_image_2Dsize();
-    size_t results_size = Functors::Euclidean<float*>::get_results_size(img_2Dsize, analyzer_properties.envi_properties.bands, N_TEST_SPECTRUM_FILES);
+    size_t results_size = Functors::Euclidean<float*, false>::get_results_size(img_2Dsize, analyzer_properties.envi_properties.bands, N_TEST_SPECTRUM_FILES);
 
     results_h = (float*)malloc(results_size * sizeof(float));
     initialize_pointer(results_h, results_size);
     
-    optional<sycl::event> copied;
-    sycl::range<1> range(Functors::Euclidean<float*>::get_range_size(img_2Dsize, analyzer_properties.envi_properties.bands, N_TEST_SPECTRUM_FILES));
-    variant<float*, sycl::buffer<float, 1>> results_d = sycl::malloc_device<float>(results_size, device_q);
+    Analyzer_variant results_d = sycl::malloc_device<float>(results_size, device_q);
 
-    Analyzer_tools::copy_to_device(false, device_q, spectrums_d, spectrums_h, N_TEST_SPECTRUM_FILES * analyzer_properties.envi_properties.bands, &copied);
-    copied.value().wait();
-    Analyzer_tools::copy_to_device(false, device_q, results_d, results_h, results_size, &copied);
-
-    Analyzer_tools::launch_kernel<Functors::Euclidean, sycl::range<1>, ANALYZERS_N_VARIANTS>
-        (device_q, range, copied, array<variant<float*, sycl::buffer<float, 1>>, ANALYZERS_N_VARIANTS> {img_d, spectrums_d, results_d},
-         N_TEST_SPECTRUM_FILES, analyzer_properties.envi_properties.lines, analyzer_properties.envi_properties.samples, analyzer_properties.envi_properties.bands).wait();
-
-    float* result_img = (float*)malloc(2*img_2Dsize * sizeof(float));
-    variant<float*, sycl::host_accessor<float>> final_results_var = result_img;
-    Analyzer_tools::copy_from_device(false, device_q, final_results_var, results_d, 2*img_2Dsize, &copied);
-    copied.value().wait();
+    Analyzer_tools::copy_to_device(false, device_q, spectrums_d, spectrums_h, N_TEST_SPECTRUM_FILES * analyzer_properties.envi_properties.bands, &copied_event);
+    copied_event.value().wait();
+    Analyzer_tools::copy_to_device(false, device_q, results_d, results_h, results_size, &copied_event);
+    
+    Analyzer_tools::launch_kernel<Functors::Euclidean>(device_q, copied_event, analyzer_properties, array{img_d, spectrums_d, results_d}, 
+                                                       analyzer_properties.n_spectrums,
+                                                       analyzer_properties.envi_properties.lines,
+                                                       analyzer_properties.envi_properties.samples,
+                                                       analyzer_properties.envi_properties.bands,
+                                                       analyzer_properties.coalescent_read_size).wait();
+        
+    float* result_img = (float*)malloc(img_2Dsize * sizeof(float));
+    Result_variant final_results_var = result_img;
+    Analyzer_tools::copy_from_device(false, device_q, final_results_var, results_d, img_2Dsize, &copied_event);
+    copied_event.value().wait();
 
     result_img = get<float*>(final_results_var);
     int sample;
@@ -335,6 +341,8 @@ exit_code test_basic_USM_euclidean() {
     
     free(result_img);
     sycl::free(get<float*>(results_d), device_q);
+
+    analyzer_properties.ND_kernel = temp_ND;
     return return_value;
 }
 
