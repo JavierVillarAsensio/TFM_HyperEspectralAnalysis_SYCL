@@ -58,11 +58,13 @@ namespace Functors {
             : BaseFunctor<Data_access, use_local_memory>(img_in, spectrums_in, results_in, n_spectrums_in, n_lines_in, n_cols_in, bands_size_in, local_data_in, coalesced_memory_width_in) {}
 
         inline static size_t get_results_size(size_t image_2D_size, size_t n_bands, size_t n_spectrums) { return image_2D_size * 2; }
-        inline static int get_range_size(size_t image_2D_size, size_t n_bands, size_t n_spectrums) { return image_2D_size * n_spectrums; }
+        inline static int get_range_global_size(size_t lines, size_t cols, size_t n_bands, size_t n_spectrums) { return lines * cols * n_spectrums; }
 
         //kernel for basic
         void operator()(sycl::id<1> id) const {
+            
             size_t wi_id = id[0];
+            
             size_t img_2D_size = this->n_lines * this->n_cols;
 
             //pixel to be compared
@@ -71,8 +73,8 @@ namespace Functors {
             //spectrum to be compared
             size_t spectrum_offset = (wi_id / img_2D_size) * this->bands_size;
 
-            //bil img offset
-            size_t img_offset = (((this->n_lines * this->bands_size) * (wi_id / this->n_lines)) + (wi_id % this->n_lines)) % (img_2D_size * this->bands_size);
+            //bil img offset            line                        line size                      line offset
+            size_t img_offset = (((wi_id / this->n_cols) * (this->n_cols * this->bands_size)) + (wi_id % this->n_cols)) % (img_2D_size * this->bands_size);
             
             float sum = 0.f, diff;
             for(int i = 0; i < this->bands_size; i++) {
@@ -83,7 +85,7 @@ namespace Functors {
             //                                                                                                                                                    where the lowest value is stored
             sycl::atomic_ref<float, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> lowest_distance(this->results_d[img_2D_size + pixel_offset]);
             float read_distance = lowest_distance.load();
-            while(sum < read_distance) {
+            while(std::fabs(sum) < std::fabs(read_distance)) {
                 if(lowest_distance.compare_exchange_weak(read_distance, sum, sycl::memory_order::relaxed)) {   //compare only if "read_distance" remains as the stored value, if so, change it
                     sycl::atomic_ref<float, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> nearest_spectrum(this->results_d[pixel_offset]);
                     nearest_spectrum.store(spectrum_offset / this->bands_size);
@@ -91,11 +93,19 @@ namespace Functors {
                 }
                 read_distance = lowest_distance.load();
             }
+            //this->results_d[wi_id] = read_distance;
         }
 
         template<bool B = use_local_memory, std::enable_if_t<!B, int> = 0>
         void operator()(sycl::nd_item<1> id) const {
-            
+            size_t group_id = id.get_group_linear_id();
+            size_t local_id = id.get_local_linear_id();
+
+            //bil img offset              line                          line size                       group 1st sample       sample
+            size_t img_offset = ((group_id / this->n_cols) * (this->n_cols * this->bands_size)) + (group_id % this->n_cols) + local_id;
+
+            size_t spectrum_offset = id.get_local_linear_id() * this->n_cols;
+
         }
 
         template<bool B = use_local_memory, std::enable_if_t<B, int> = 0>

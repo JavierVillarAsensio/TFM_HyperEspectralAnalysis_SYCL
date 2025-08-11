@@ -15,6 +15,8 @@ cxx = icpx -std=c++20 -fsycl -I$(include_folder)
 precompiled = $(object_files_folder)/ENVI_reader.o $(object_files_folder)/Analyzer_tools.o
 test_precompiled = $(precompiled) $(object_files_folder)/tests.o
 
+
+
 # --------------------- precompilations --------------------- #
 
 $(object_files_folder)/ENVI_reader.o: $(ENVI_folder)/ENVI_reader.cpp $(include_folder)/ENVI_reader.hpp | $(object_files_folder)

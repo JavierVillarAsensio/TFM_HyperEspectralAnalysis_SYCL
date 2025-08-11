@@ -18,7 +18,7 @@
 using Analyzer_variant = std::variant<float*, sycl::buffer<float, 1>>;
 using Result_variant = std::variant<float*, sycl::host_accessor<float>>;
 using Event_opt = std::optional<sycl::event>;
-using Acc = sycl::accessor<float, 1, sycl::access::mode::read_write, sycl::access::target::device>;
+using Acc = sycl::accessor<float, 1, sycl::access::mode::read_write>;
 
 constexpr const char* help_message = "These are the options to execute the program:\n"
                                         "\t-h Shows this message\n"
@@ -82,16 +82,14 @@ namespace Analyzer_tools {
 
         template <template <typename, bool> typename Functor, bool use_local_memory, size_t array_size, typename Data_access_type, typename... Args>
         inline auto make_functor(Data_access_type /*detect type*/, std::array<Data_access_type, array_size>& accesses, size_t bands_size, sycl::handler& h, Args&&... args) {
-            std::array<Acc, array_size> accessors_arr{};
             using Array_type = std::conditional_t<std::is_same_v<Data_access_type, sycl::buffer<float,1>>, std::array<Acc, array_size>, std::array<float*, array_size>>;
             using Array_data_type = std::conditional_t<std::is_same_v<Data_access_type, sycl::buffer<float, 1>>, Acc, float*>;
 
             Array_type array_in;
             if constexpr (std::is_same_v<Data_access_type, sycl::buffer<float,1>>) {
                 for (size_t i = 0; i < array_size; ++i)
-                    accessors_arr[i] = accesses[i].template get_access<sycl::access::mode::read_write>(h);
+                    array_in[i] = accesses[i].template get_access<sycl::access::mode::read_write>(h);
 
-                array_in = accessors_arr;
             }
             else if constexpr (std::is_same_v<Data_access_type, float*>)
                 array_in = accesses;
@@ -114,8 +112,9 @@ namespace Analyzer_tools {
                         h.depends_on(opt_dependency.value());
 
                     auto f = detail::make_functor<Functor, use_local_memory, array_size, Data_access_type>(accesses[0], accesses, bands_size, h, std::forward<Args>(args)...);
+                    using Kernell_access_type = decltype(f.img_d);
 
-                    h.parallel_for<KernelName<Functor, Data_access_type, use_local_memory, Range_type>>(range, f);
+                    h.parallel_for<KernelName<Functor, Kernell_access_type, use_local_memory, Range_type>>(range, f);
                 });
             } catch (const sycl::exception &e) {
                 std::cerr << "Error when launching SYCL kernel, error message: " << e.what() << std::endl;
@@ -131,7 +130,7 @@ namespace Analyzer_tools {
     std::string get_filename_by_extension(const char* directory, const char* file_extension);
     exit_code initialize_SYCL_queue(Analyzer_tools::Analyzer_properties& properties, sycl::queue& q);
     exit_code copy_to_device(bool use_accessors, sycl::queue& device_q, Analyzer_variant& ptr_d, float* ptr_h, size_t copy_size, Event_opt* copied = nullptr);
-    exit_code copy_from_device(bool use_accessors, sycl::queue& device_q, Result_variant& ptr_h, Analyzer_variant& ptr_d, size_t copy_size, Event_opt* copied = nullptr);
+    exit_code copy_from_device(bool use_accessors, sycl::queue& device_q, float* ptr_h, Analyzer_variant& ptr_d, size_t copy_size, Event_opt* copied = nullptr);
 
     template<template <typename, bool> typename Functor, typename... Args>
     inline sycl::event launch_kernel(sycl::queue& device_q, Event_opt& opt_dependency, Analyzer_properties& p, std::array<Analyzer_variant, Functor<float*, false>::get_n_access_points()>&& variants, Args... args) {

@@ -27,18 +27,15 @@ void free_resources() {
 }
 
 template<typename T>
-void initialize_pointer(T* ptr, size_t ptr_size) {
+void initialize_pointer(T* ptr, size_t ptr_size, float value = FLOAT_MAX) {
     for(size_t i = 0; i < ptr_size; i++)
-        ptr[i] = 0;
+        ptr[i] = value;
 }
 
 exit_code check_result_img(float* ptr) {
-    int a,b;
-    for(size_t i = 0; i < IMG_2D_SIZE; i++) {
-        a = static_cast<int>(ptr[i]); 
-        if(static_cast<int>(ptr[i]) % (i + 1))
+    for(size_t i = 0; i < IMG_2D_SIZE; i++)
+        if(static_cast<int>(ptr[i]) != ((i + 1)  % 2))
             return EXIT_FAILURE;
-    }
 
     return EXIT_SUCCESS;
 }
@@ -242,19 +239,16 @@ exit_code test_copy_USM() { return Analyzer_tools::copy_to_device(false, device_
 
 exit_code test_scale_img_USM() {
     size_t img_size = analyzer_properties.envi_properties.get_image_3Dsize();
-    Result_variant result_var;
-    float* result = sycl::malloc_host<float>(img_size, device_q);
-    result_var = result;
+    float* ptr_h = (float*)malloc(img_size * sizeof(float));
 
     Analyzer_tools::launch_kernel<Functors::ImgScaler>(device_q, copied_event, analyzer_properties, array{img_d}, analyzer_properties.envi_properties.reflectance_scale_factor).wait();
 
-    Analyzer_tools::copy_from_device(false, device_q, result_var, img_d, img_size, &copied_event);
+    Analyzer_tools::copy_from_device(false, device_q, ptr_h, img_d, img_size, &copied_event);
     copied_event.value().wait();
 
-    float* result_copied = get<float*>(result_var);
-    exit_code ret = check_scaled(result_copied);
+    exit_code ret = check_scaled(ptr_h);
 
-    sycl::free(result, device_q);
+    free(ptr_h);
 
     return ret;
 }
@@ -267,22 +261,20 @@ exit_code test_copy_buff() {
 exit_code test_scale_img_acc() {
     size_t img_size = analyzer_properties.envi_properties.get_image_3Dsize();
     Analyzer_variant img_d_buff;
-    Result_variant result_img_var;
-    sycl::host_accessor<float> result_img;
-    result_img_var = result_img;
+    float* ptr_h = (float*)malloc(img_size * sizeof(float));
 
     Analyzer_tools::copy_to_device(true, device_q, img_d_buff, img_h, img_size, &copied_event);
 
-    Analyzer_tools::launch_kernel<Functors::ImgScaler>(device_q, copied_event, analyzer_properties, array{img_d_buff}, analyzer_properties.envi_properties.reflectance_scale_factor);
+    Analyzer_tools::launch_kernel<Functors::ImgScaler>(device_q, copied_event, analyzer_properties, array{img_d_buff}, analyzer_properties.envi_properties.reflectance_scale_factor).wait();
     
-    Analyzer_tools::copy_from_device(true, device_q, result_img_var, img_d_buff, img_size, &copied_event);
+    Analyzer_tools::copy_from_device(true, device_q, ptr_h, img_d_buff, img_size, &copied_event);
     copied_event.value().wait();
 
-    result_img = std::move(get<sycl::host_accessor<float>>(result_img_var));
+    bool ret = check_scaled(ptr_h);
 
-    exit_code ret = check_scaled(result_img);
+    free(ptr_h);
 
-    return EXIT_SUCCESS;
+    return ret;
 }
 
 exit_code test_initializa_SYCL_queue() { return Analyzer_tools::initialize_SYCL_queue(analyzer_properties, device_q); }
@@ -332,14 +324,11 @@ exit_code test_basic_USM_euclidean() {
         
     float* result_img = (float*)malloc(img_2Dsize * sizeof(float));
     Result_variant final_results_var = result_img;
-    Analyzer_tools::copy_from_device(false, device_q, final_results_var, results_d, img_2Dsize, &copied_event);
+    Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, img_2Dsize * 2, &copied_event);
     copied_event.value().wait();
 
-    result_img = get<float*>(final_results_var);
-    int sample;
-    exit_code return_value = check_result_img(result_img);
+    exit_code return_value = check_result_img(results_h);
     
-    free(result_img);
     sycl::free(get<float*>(results_d), device_q);
 
     analyzer_properties.ND_kernel = temp_ND;

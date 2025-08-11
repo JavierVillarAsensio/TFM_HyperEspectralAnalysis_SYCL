@@ -193,19 +193,19 @@ namespace Analyzer_tools {
         return EXIT_SUCCESS;
     }
 
-    exit_code copy_from_device(bool use_accessors, sycl::queue& device_q, variant<float*, sycl::host_accessor<float>>& ptr_h, variant<float*, sycl::buffer<float, 1>>& ptr_d, size_t copy_size, optional<sycl::event>* copied) {
+    exit_code copy_from_device(bool use_accessors, sycl::queue& device_q, float* ptr_h, variant<float*, sycl::buffer<float, 1>>& ptr_d, size_t copy_size, optional<sycl::event>* copied) {
         try {
             if(use_accessors) {
                 sycl::host_accessor<float> temp_acc(get<sycl::buffer<float, 1>>(ptr_d));
-                ptr_h = std::move(temp_acc);
+                std::copy(temp_acc.begin(), temp_acc.begin() + copy_size, ptr_h);
                 if(copied)
                     *copied = device_q.submit([](sycl::handler& h) {});     //complete the event with a kernel with nothing 
             }
             else {
                 if(copied)
-                    *copied = device_q.memcpy(get<float*>(ptr_h), get<float*>(ptr_d), copy_size * sizeof(float));
+                    *copied = device_q.memcpy(ptr_h, get<float*>(ptr_d), copy_size * sizeof(float));
                 else
-                    device_q.memcpy(get<float*>(ptr_h), get<float*>(ptr_d), copy_size * sizeof(float));
+                    device_q.memcpy(ptr_h, get<float*>(ptr_d), copy_size * sizeof(float));
             }
         } catch (const sycl::exception& e) {
             std::cerr << "ERROR: error when trying to copy to host from device with SYCL, error message: " << e.what() << std::endl;
