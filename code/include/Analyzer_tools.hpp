@@ -63,18 +63,24 @@ namespace Analyzer_tools {
     };    
     
     namespace detail {
-        template<template<typename, bool> typename Functor, typename Data_access_type, bool use_local_memory, typename RangeType>
+        template<template<typename> typename Functor, typename Data_access_type, typename RangeType>
         struct KernelName{};
 
-        template<template <typename, bool> typename Functor, typename Data_access_type, bool use_local_memory, typename... Args>
-        inline Functor<Data_access_type, use_local_memory> construct_functor(std::array<Data_access_type, Functor<Data_access_type, use_local_memory>::get_n_access_points()>& arr, sycl::handler& h, Args... args){
-                return [&]<size_t... Indexes>(std::index_sequence<Indexes...>) {
-                    return Functor<Data_access_type, use_local_memory> ( arr[Indexes]..., std::forward<Args>(args)...);
-                }(std::make_index_sequence<Functor<Data_access_type, use_local_memory>::get_n_access_points()>{});
+        template<template <typename> typename Functor, typename Data_access_type, bool use_local_memory, typename... Args>
+        inline Functor<Data_access_type> construct_functor(std::array<Data_access_type, Functor<Data_access_type>::get_n_access_points()>& arr, Analyzer_properties& p, sycl::handler& h, Args... args){
+            Local_mem_wrapper local_mem_wrapped;
+            if constexpr (use_local_memory) {
+                auto local_mem = sycl::local_accessor<float, 1>(Functor<Data_access_type>::get_local_mem_size(p.envi_properties.lines, p.envi_properties.samples, p.envi_properties.bands, p.n_spectrums), h);
+                local_mem_wrapped = Local_mem_wrapper(local_mem);
+            }
+            
+            return [&]<size_t... Indexes>(std::index_sequence<Indexes...>) {
+                    return Functor<Data_access_type> ( arr[Indexes]..., std::forward<Args>(args)..., local_mem_wrapped);
+                }(std::make_index_sequence<Functor<Data_access_type>::get_n_access_points()>{});
         }
 
-        template <template <typename, bool> typename Functor, bool use_local_memory, size_t array_size, typename Data_access_type, typename... Args>
-        inline auto make_functor(Data_access_type /*detect type*/, std::array<Data_access_type, array_size>& accesses, sycl::handler& h, Args&&... args) {
+        template <template <typename> typename Functor, bool use_local_memory, size_t array_size, typename Data_access_type, typename... Args>
+        inline auto make_functor(Data_access_type /*detect type*/, std::array<Data_access_type, array_size>& accesses, Analyzer_properties& p, sycl::handler& h, Args&&... args) {
             using Array_type = std::conditional_t<std::is_same_v<Data_access_type, sycl::buffer<float,1>>, std::array<Acc, array_size>, std::array<float*, array_size>>;
             using Array_data_type = std::conditional_t<std::is_same_v<Data_access_type, sycl::buffer<float, 1>>, Acc, float*>;
 
@@ -87,7 +93,7 @@ namespace Analyzer_tools {
             else if constexpr (std::is_same_v<Data_access_type, float*>)
                 array_in = accesses;
 
-            return construct_functor<Functor, Array_data_type, use_local_memory>(array_in, h, std::forward<Args>(args)...);
+            return construct_functor<Functor, Array_data_type, use_local_memory>(array_in, p, h, std::forward<Args>(args)...);
         }
 
         template <typename Data_access_type, size_t N_ACCESSES, typename ArrayType>
@@ -97,38 +103,27 @@ namespace Analyzer_tools {
             }(std::make_index_sequence<N_ACCESSES>{});
         }
 
-        template<template <typename, bool> typename Functor, typename Data_access_type, typename Range_type, bool use_local_memory, size_t array_size, typename... Args>
-        inline sycl::event __launch_kernel(sycl::queue& device_q, Event_opt& opt_dependency, Range_type range, std::array<Data_access_type, array_size>&& accesses, Args... args) {  
-            using Static_f = Functor<float*, false>;
+        template<template <typename> typename Functor, typename Data_access_type, typename Range_type, bool use_local_memory, size_t array_size, typename... Args>
+        inline sycl::event __launch_kernel(sycl::queue& device_q, Event_opt& opt_dependency, Analyzer_properties& p, Range_type range, std::array<Data_access_type, array_size>&& accesses, Args... args) {  
+            using Static_f = Functor<float*>;
             try {
                 return device_q.submit([&](sycl::handler& h) {
                     if(opt_dependency.has_value())
                         h.depends_on(opt_dependency.value());
 
-                    auto f = detail::make_functor<Functor, use_local_memory, array_size, Data_access_type>(accesses[0], accesses, h, std::forward<Args>(args)...);
-                    using Kernell_access_type = decltype(f.img_d);
+                    auto f = detail::make_functor<Functor, use_local_memory, array_size, Data_access_type>(accesses[0], accesses, p, h, std::forward<Args>(args)...);
                             
-                    if constexpr (std::is_same_v<Range_type, sycl::nd_range<1>> && use_local_memory && Static_f::has_ND()) {
-                        sycl::local_accessor<float, 1> local_mem(f.get_local_mem_size(), h);
-
-                        //h.parallel_for<KernelName<Functor, Kernell_access_type, use_local_memory, Range_type>>(range, [=](sycl::nd_item<1> item, sycl::local_accessor<float, 1> local_mem) {
-                          //  f(item, local_mem);
-                        //});
-                    }
-                    else {
-                        h.parallel_for<KernelName<Functor, Kernell_access_type, use_local_memory, Range_type>>(range, f);
-                    }
+                    h.parallel_for<KernelName<Functor, decltype(f.img_d), Range_type>>(range, f);
                 });
             } catch (const sycl::exception &e) {
                 std::cerr << "Error when launching SYCL kernel, error message: " << e.what() << std::endl;
-            } 
-
+            }
             return sycl::event {};
         }
     
-        template<template <typename, bool> typename Functor>
-        Range_variant create_result_variant(Analyzer_properties& p) {
-            using Static_f = Functor<float*, false>;
+        template<template <typename> typename Functor>
+        Range_variant create_range_variant(Analyzer_properties& p) {
+            using Static_f = Functor<float*>;
             Range_variant var_range;
         
             size_t global_size = Static_f::get_range_global_size(p.envi_properties.lines, p.envi_properties.samples, p.envi_properties.bands, p.n_spectrums, HAS_LOCAL_MEM(p));
@@ -150,11 +145,11 @@ namespace Analyzer_tools {
     exit_code copy_to_device(bool use_accessors, sycl::queue& device_q, Analyzer_variant& ptr_d, float* ptr_h, size_t copy_size, Event_opt* copied = nullptr);
     exit_code copy_from_device(bool use_accessors, sycl::queue& device_q, float* ptr_h, Analyzer_variant& ptr_d, size_t copy_size, Event_opt* copied = nullptr);
 
-    template<template <typename, bool> typename Functor, typename... Args>
-    inline sycl::event launch_kernel(sycl::queue& device_q, Event_opt& opt_dependency, Analyzer_properties& p, std::array<Analyzer_variant, Functor<float*, false>::get_n_access_points()>&& variants, Args... args) {
-        using Static_f = Functor<float*, false>;
+    template<template <typename> typename Functor, typename... Args>
+    inline sycl::event launch_kernel(sycl::queue& device_q, Event_opt& opt_dependency, Analyzer_properties& p, std::array<Analyzer_variant, Functor<float*>::get_n_access_points()>&& variants, Args... args) {
+        using Static_f = Functor<float*>;
         sycl::event return_event;
-        Range_variant var_range = detail::create_result_variant<Functor>(p);
+        Range_variant var_range = detail::create_range_variant<Functor>(p);
         
         try {
             std::visit([&](auto&& range) {
@@ -164,14 +159,16 @@ namespace Analyzer_tools {
                     if(HAS_LOCAL_MEM(p) && std::is_same_v<Range_type, sycl::nd_range<1>>)
                         return_event = detail::__launch_kernel<Functor, Data_access_type, Range_type, true, Static_f::get_n_access_points()>
                                 (device_q, 
-                                 opt_dependency, 
+                                 opt_dependency,
+                                 p,
                                  range, 
                                  detail::create_array<Data_access_type, Static_f::get_n_access_points(), std::array<Analyzer_variant, Static_f::get_n_access_points()>>(variants), 
                                  std::forward<Args>(args)...);
                     else
                         return_event = detail::__launch_kernel<Functor, Data_access_type, Range_type, false, Static_f::get_n_access_points()>
                                 (device_q, 
-                                 opt_dependency, 
+                                 opt_dependency,
+                                 p,
                                  range, 
                                  detail::create_array<Data_access_type, Static_f::get_n_access_points(), std::array<Analyzer_variant, Static_f::get_n_access_points()>>(variants), 
                                  std::forward<Args>(args)...);

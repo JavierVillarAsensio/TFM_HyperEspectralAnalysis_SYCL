@@ -305,7 +305,7 @@ exit_code test_basic_euclidean() {
     analyzer_properties.ND_kernel = false;
 
     size_t img_2Dsize = analyzer_properties.envi_properties.get_image_2Dsize();
-    size_t results_size = Functors::Euclidean<float*, false>::get_results_size(analyzer_properties.envi_properties.lines, 
+    size_t results_size = Functors::Euclidean<float*>::get_results_size(analyzer_properties.envi_properties.lines, 
                                                                                analyzer_properties.envi_properties.samples, 
                                                                                analyzer_properties.envi_properties.bands, 
                                                                                N_TEST_SPECTRUM_FILES, 
@@ -345,7 +345,7 @@ exit_code test_basic_euclidean() {
 exit_code test_ND_euclidean() {
     size_t temp_local_mem = analyzer_properties.device_local_memory;
     analyzer_properties.device_local_memory = 0;
-    size_t results_size = Functors::Euclidean<float*, false>::get_results_size(analyzer_properties.envi_properties.lines, 
+    size_t results_size = Functors::Euclidean<float*>::get_results_size(analyzer_properties.envi_properties.lines, 
                                                                                analyzer_properties.envi_properties.samples, 
                                                                                analyzer_properties.envi_properties.bands, 
                                                                                N_TEST_SPECTRUM_FILES, 
@@ -365,8 +365,6 @@ exit_code test_ND_euclidean() {
                                                        analyzer_properties.envi_properties.bands,
                                                        analyzer_properties.coalescent_read_size).wait();
 
-    float* result_img = (float*)malloc(results_size * sizeof(float));
-    Result_variant final_results_var = result_img;
     Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, results_size, &copied_event);
     copied_event.value().wait();
 
@@ -374,14 +372,13 @@ exit_code test_ND_euclidean() {
     
     sycl::free(get<float*>(results_d), device_q);
     free(results_h);
-    free(result_img);
 
     analyzer_properties.device_local_memory = temp_local_mem;
     return return_value;
 }
-/*
+
 exit_code test_ND_localMem_euclidean() {
-    size_t results_size = Functors::Euclidean<float*, false>::get_results_size(analyzer_properties.envi_properties.lines, 
+    size_t results_size = Functors::Euclidean<float*>::get_results_size(analyzer_properties.envi_properties.lines, 
                                                                                analyzer_properties.envi_properties.samples, 
                                                                                analyzer_properties.envi_properties.bands, 
                                                                                N_TEST_SPECTRUM_FILES, 
@@ -401,24 +398,23 @@ exit_code test_ND_localMem_euclidean() {
                                                        analyzer_properties.envi_properties.bands,
                                                        analyzer_properties.coalescent_read_size).wait();
 
-    float* result_img = (float*)malloc(results_size * sizeof(float));
-    Result_variant final_results_var = result_img;
     Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, results_size, &copied_event);
     copied_event.value().wait();
 
+    for(size_t i = 0; i < results_size; i++)
+        std::cout << i << ": " << results_h[i] << " " << endl;
+
     exit_code return_value = check_result_img(results_h);
-    
     sycl::free(get<float*>(results_d), device_q);
     free(results_h);
-    free(result_img);
 
     return return_value;
 }
-*/
+
 void kernel_tests(int& tests_done, int& tests_passed) {
     test(test_basic_euclidean, "basic euclidean kernel", tests_passed, tests_done);
     test(test_ND_euclidean, "ND euclidean kernel", tests_passed, tests_done);
-    //test(test_ND_localMem_euclidean, "ND with local memory euclidean kernel", tests_passed, tests_done);
+    test(test_ND_localMem_euclidean, "ND with local memory euclidean kernel", tests_passed, tests_done);
 }
 
 /////////////////////////////////MAIN//////////////////////////////////
@@ -443,7 +439,7 @@ int main(int argc, char **argv){
     else
         cout << "\033[32mThe number of tests passed matches the tests done: \033[0m" << "Tests passed: " << tests_passed << " == " "Tests done: " << tests_done << endl;
 
-    free_resources();
+    //free_resources();
 
     return EXIT_SUCCESS;
 }
