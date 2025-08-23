@@ -5,10 +5,10 @@
 #include <string>
 
 ////////////GENERAL DATA////////////
-#define TEST_IMG_FILE_PATH "code/test/jasperRidge2_R198_test/jasperRidge2_R198.img"
-#define TEST_HDR_FILE_PATH "code/test/jasperRidge2_R198_test/jasperRidge2_R198.hdr"
-#define TEST_HDR_IMG_DIRECTORY "code/test/jasperRidge2_R198_test/"
-#define TEST_SPEC_FILE_PATH "code/test/spectrums_test/"
+#define TEST_IMG_FILE_PATH "Analyzer/test/jasperRidge2_R198_test/jasperRidge2_R198.img"
+#define TEST_HDR_FILE_PATH "Analyzer/test/jasperRidge2_R198_test/jasperRidge2_R198.hdr"
+#define TEST_HDR_IMG_DIRECTORY "Analyzer/test/jasperRidge2_R198_test/"
+#define TEST_SPEC_FILE_PATH "Analyzer/test/spectrums_test/"
 #define TEST_RESULT_JPG_PATH "output/result.jpg"
 
 extern const std::string ERROR = "\033[31mERROR\033[0m";   // Red

@@ -1,10 +1,9 @@
 /Test
-/Analyzer
+/Analyzer.exe
 .vscode/
+/Analyzer/object_files/
 *.txt
 spectrums/2/
 spectrums/3/
 spectrums/4/
 spectrums/spectrums.csv
-code/object_files/
-*.sh

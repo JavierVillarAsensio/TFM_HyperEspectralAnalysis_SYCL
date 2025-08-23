@@ -1,3 +1,4 @@
+/*
 #include <Analyzer_tools.h>
 #include <iostream>
 #include <Functors.h>
@@ -157,4 +158,4 @@ int main(int argc, char* argv[]) {
         free_USM_resources(device_q, img_d, spectrums_d);
 
     return EXIT_SUCCESS;
-}
+}*/
