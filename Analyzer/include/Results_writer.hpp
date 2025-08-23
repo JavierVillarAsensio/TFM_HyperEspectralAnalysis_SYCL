@@ -7,12 +7,14 @@
 #include <string>
 #include <fstream>
 
-#include <stb_image_write.h>
-
 #define JPG_MAX_QUALITY 100
+#define LEGEND_FILE_EXTENSION "_legend.txt"
+#define JPG_FILE_EXTENSION ".jpg"
 
-int write_jpg(int *nearest_materials_image, size_t width, size_t height, const char* result_file_name);
-int write_legend(string *materials, size_t file_size, const char* legend_file_name);
+typedef int exit_code;
 
+const std::filesystem::path OUTPUT_FOLDER = "output";
+
+exit_code create_results(const char* results_file_name, int *nearest_materials_image, size_t width, size_t height, std::string *materials, size_t n_materials);
 
 #endif

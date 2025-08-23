@@ -9,7 +9,7 @@
 #define TEST_HDR_FILE_PATH "Analyzer/test/jasperRidge2_R198_test/jasperRidge2_R198.hdr"
 #define TEST_HDR_IMG_DIRECTORY "Analyzer/test/jasperRidge2_R198_test/"
 #define TEST_SPEC_FILE_PATH "Analyzer/test/spectrums_test/"
-#define TEST_RESULT_JPG_PATH "output/result.jpg"
+#define TEST_RESULT_FILE "output/result"
 
 extern const std::string ERROR = "\033[31mERROR\033[0m";   // Red
 extern const std::string PASS  = "\033[32mPASS\033[0m";    // Green

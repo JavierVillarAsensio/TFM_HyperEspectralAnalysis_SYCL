@@ -1,8 +1,11 @@
 #include <Results_writer.hpp>
 
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
+
 using namespace std;
 
-int write_jpg(int *nearest_materials_image, size_t width, size_t height, const char* results_file_name){
+int write_jpg(int *nearest_materials_image, size_t width, size_t height, string results_file_name){
     
     const int channels = 3, given_colours = 10; //RGB and given colours
     int colors[20 * channels] = {
@@ -37,14 +40,24 @@ int write_jpg(int *nearest_materials_image, size_t width, size_t height, const c
         image[(channels * i) + 2] = static_cast<unsigned char>(colors[calculated_index + 2]);
     }
 
-    if (!stbi_write_jpg(results_file_name, width, height, channels, image, JPG_MAX_QUALITY)) {
-        cout << "Error creating jpg. Aborting..." << endl;
+    if(!filesystem::exists(OUTPUT_FOLDER))
+        if(!filesystem::create_directory(OUTPUT_FOLDER)){
+            cerr << "Error creating output folder. Aborting..." << endl;
+            delete[] image;
+            return EXIT_FAILURE;
+        }
+
+    if (!stbi_write_jpg(results_file_name.c_str(), width, height, channels, image, JPG_MAX_QUALITY)) {
+        cerr << "Error creating jpg. Aborting..." << endl;
+        delete[] image;
         return EXIT_FAILURE;
     }
+
+    delete[] image;
     return EXIT_SUCCESS;
 }
 
-int write_legend(string *materials, size_t file_size, const char* legend_file_name){
+int write_legend(int *nearest_materials_image, size_t n_pixels, string *materials, size_t file_size, string legend_file_name){
     const int n_colors = 20;
     string colors_name[n_colors] = {
         "Red",
@@ -75,8 +88,34 @@ int write_legend(string *materials, size_t file_size, const char* legend_file_na
         return EXIT_FAILURE;
     }
 
-    for(int i = 0; i < file_size; i++){
-        out << i+1 << ": " << materials[i] << "   =>   " << colors_name[i] << endl;
+    int* pixels_per_material = (int*)malloc(file_size * sizeof(int));
+    for(size_t i = 0; i < file_size; i++)
+        pixels_per_material[i] = 0;
+    
+    for(size_t i = 0; i < n_pixels; i++)
+        pixels_per_material[nearest_materials_image[i]]++;
+
+    for(size_t i = 0; i < file_size; i++){
+        out << i+1 << ": " << materials[i] << "   =>   " << colors_name[i] << "   " << pixels_per_material[i] << "/" << n_pixels << "   " << pixels_per_material[i]*100.0/n_pixels << "% of the total pixels" << endl;
+    }
+
+    free(pixels_per_material);
+
+    return EXIT_SUCCESS;
+}
+
+exit_code create_results(const char* results_file_name, int *nearest_materials_image, size_t width, size_t height, string *materials, size_t n_materials){
+    string results_jpg_file_name = string(results_file_name) + JPG_FILE_EXTENSION;
+    string results_legend_file_name = string(results_file_name) + LEGEND_FILE_EXTENSION;
+
+    if(write_jpg(nearest_materials_image, width, height, results_jpg_file_name)){
+        cerr << "An unexpected error ocurred writing the jpg results file" << endl;
+        return EXIT_FAILURE;
+    }
+
+    if(write_legend(nearest_materials_image, width * height, materials, n_materials, results_legend_file_name)){
+        cerr << "An unexpected error ocurred writing the legend results file" << endl;
+        return EXIT_FAILURE;
     }
 
     return EXIT_SUCCESS;

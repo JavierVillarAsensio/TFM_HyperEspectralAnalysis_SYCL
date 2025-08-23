@@ -12,6 +12,8 @@ test_folder = ./Analyzer/test
 test_spectrums = /spectrums_test
 include_test = -I./Analyzer/test
 
+output_folder = ./output
+
 given_spectrums_folder = ./spectrums/given_spectrums
 
 cxx = icpx -std=c++20 -fsycl -I$(include_folder)
@@ -59,6 +61,8 @@ clean:
 	rm -f $(binary)
 	rm -f $(test_binary)
 	rm -f *.txt
+	rm -f $(output_folder)/*
 
 clean_all: clean
 	rm -rf $(object_files_folder)
+	rm -rf $(output_folder)

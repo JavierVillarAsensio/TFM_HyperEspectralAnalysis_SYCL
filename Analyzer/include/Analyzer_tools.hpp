@@ -9,6 +9,7 @@
 #include <optional>
 #include <utility>
 #include <array>
+#include <Results_writer.hpp>
 
 #define HDR_FILE_EXTENSION ".hdr"
 #define IMG_FILE_EXTENSION ".img"

@@ -9,6 +9,7 @@ using namespace std;
 Analyzer_tools::Analyzer_properties analyzer_properties;
 float* img_h = nullptr;
 float* spectrums_h = nullptr;
+float* final_results_h = nullptr;
 Analyzer_variant img_d;
 Analyzer_variant spectrums_d;
 string* names = nullptr;
@@ -309,14 +310,13 @@ exit_code test_basic_euclidean() {
                                                                                N_TEST_SPECTRUM_FILES, 
                                                                                analyzer_properties.ND_kernel);
 
-    float* results_h;
-    initialize_pointer(results_h, results_size);
+    initialize_pointer(final_results_h, results_size);
     
     Analyzer_variant results_d = sycl::malloc_device<float>(results_size, device_q);
 
     Analyzer_tools::copy_to_device(false, device_q, spectrums_d, spectrums_h, N_TEST_SPECTRUM_FILES * analyzer_properties.envi_properties.bands, &copied_event);
     copied_event.value().wait();
-    Analyzer_tools::copy_to_device(false, device_q, results_d, results_h, results_size, &copied_event);
+    Analyzer_tools::copy_to_device(false, device_q, results_d, final_results_h, results_size, &copied_event);
     
     Analyzer_tools::launch_kernel<Functors::Euclidean>(device_q, copied_event, analyzer_properties, array{img_d, spectrums_d, results_d}, 
                                                        analyzer_properties.n_spectrums,
@@ -327,13 +327,12 @@ exit_code test_basic_euclidean() {
         
     float* result_img = (float*)malloc(img_2Dsize * sizeof(float));
     Result_variant final_results_var = result_img;
-    Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, img_2Dsize * 2, &copied_event);
+    Analyzer_tools::copy_from_device(false, device_q, final_results_h, results_d, img_2Dsize * 2, &copied_event);
     copied_event.value().wait();
 
-    exit_code return_value = check_result_img(results_h);
+    exit_code return_value = check_result_img(final_results_h);
     
     sycl::free(get<float*>(results_d), device_q);
-    free(results_h);
     free(result_img);
 
     analyzer_properties.ND_kernel = temp_ND;
@@ -412,6 +411,25 @@ void kernel_tests(int& tests_done, int& tests_passed) {
     //test(test_ND_localMem_euclidean, "ND with local memory euclidean kernel", tests_passed, tests_done);
 }
 
+
+/////////////////////////////RESULT TESTS//////////////////////////////
+exit_code test_create_results() {
+    size_t img_2Dsize = analyzer_properties.envi_properties.get_image_2Dsize();
+
+    int *nearest_materials_image = (int*)malloc(img_2Dsize * sizeof(int));
+    for(size_t i = 0; i < img_2Dsize; i++)
+        nearest_materials_image[i] = (int)final_results_h[i];
+
+    exit_code code = create_results(TEST_RESULT_FILE, nearest_materials_image, analyzer_properties.envi_properties.samples, analyzer_properties.envi_properties.lines, names, analyzer_properties.n_spectrums);
+    free(nearest_materials_image);
+    return code;
+}
+
+void results_tests(int& tests_done, int& tests_passed) {
+    test(test_create_results, "create results files", tests_passed, tests_done);
+}
+
+
 /////////////////////////////////MAIN//////////////////////////////////
 int main(int argc, char **argv){
     int tests_done = 0, tests_passed = 0;
@@ -428,6 +446,7 @@ int main(int argc, char **argv){
     spectrums_tests(tests_done, tests_passed);
     sycl_tests(tests_done, tests_passed);
     kernel_tests(tests_done, tests_passed);
+    results_tests(tests_done, tests_passed);
 
     if (tests_passed != tests_done)
         cout << "\033[31mThe number of tests passed is lower than the tests done: \033[0m" << "Tests passed: " << tests_passed << " < " "Tests done: " << tests_done << endl;
