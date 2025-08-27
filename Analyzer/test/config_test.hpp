@@ -32,15 +32,16 @@ constexpr float TEST_WAVELENGTHS[TEST_BANDS] = {2000.0, 4000.0};
 
 ////////////IMAGE DATA////////////
 constexpr size_t TEST_IMG_SIZE = TEST_BANDS * TEST_SAMPLES * TEST_LINES;
+//need variance for CCM
 constexpr short int TESTING_IMG[TEST_IMG_SIZE] = {
-    900, 1100,   1900, 2100,   800, 1200,
-    1800, 2200,  1000, 1000,   2000, 2000,
-    800, 1200,   1900, 2100,   900, 1100
+    415, 786,   2648, 3138,   417, 769,
+    2651, 2542,  379, 883,   2547, 2892,
+    697, 413,   2664, 2779,   656, 532
 };
 constexpr float TEST_SCALED_IMG[TEST_IMG_SIZE] = {
-    9, 11,   19, 21,   8, 12,
-    18, 22,  10, 10,   20, 20,
-    8, 12,   19, 21,   9, 11
+    4.15, 7.86,   26.48, 31.38,   4.17, 7.69,
+    26.51, 25.42,  3.79, 8.83,   25.47, 28.92,
+    6.97, 4.13,   26.64, 27.79,   6.56, 5.32
 };
 const size_t TESTING_IMG_N_ELEMENTS = sizeof(TESTING_IMG) / sizeof(short int);
 const size_t IMG_2D_SIZE = TEST_SAMPLES * TEST_LINES;

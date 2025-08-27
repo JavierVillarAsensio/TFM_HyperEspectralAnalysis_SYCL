@@ -337,7 +337,7 @@ namespace Functors {
             
             read_coefficient = this->results_d[group_id];
             if(std::fabs(correlation - read_coefficient) < 0.0000001)   //tolerance for float comparison
-                highest_coefficient.store(local_id);    //store the index of the nearest spectrum
+                highest_coefficient.store(local_id);    //store the index of the nearest spectrum*/
         }
     };
 };
