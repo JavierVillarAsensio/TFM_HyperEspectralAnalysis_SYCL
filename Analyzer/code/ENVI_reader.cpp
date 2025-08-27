@@ -103,7 +103,8 @@ auto extract_value(istringstream &lineStream, Callback cb, bool mapping, Args&&.
 void save_reflectances(ifstream& file, float* reflectances, ENVI_properties& properties, bool asc_order, int wavelengths_scale_factor){
     string line;
     int wavelengths_index, iterate, reflectances_index = 0;
-    float wavelength, reflectance, previous_reflectance, diff, previous_diff = 10000000;
+    float previous_wavelength, new_wavelength, previous_reflectance, new_reflectance, read_wavelength;
+    float previous_diff, new_diff;
     
     if (asc_order){
         wavelengths_index = 0;
@@ -114,21 +115,53 @@ void save_reflectances(ifstream& file, float* reflectances, ENVI_properties& pro
         iterate = -1;
     }
 
-    while (getline(file, line)){ 
+    streampos pos;
+    while(true) {
+        pos = file.tellg();
+
+        getline(file, line);
         istringstream line_stream(line);
+        float a, b;
+        if((line_stream >> a >> b)) {
+            file.seekg(pos);
+            break;
+        }
+    }
 
-        line_stream >> wavelength >> reflectance;
-        wavelength *= wavelengths_scale_factor;
+    getline(file, line);
+    istringstream previous_line_stream(line);
+    previous_line_stream >> previous_wavelength >> previous_reflectance;
+    previous_wavelength *= wavelengths_scale_factor;
 
-        diff = abs(properties.wavelengths[wavelengths_index] - wavelength);
-        if(previous_diff < diff){
+    getline(file, line);
+    istringstream new_line_stream(line);
+    new_line_stream >> new_wavelength >> new_reflectance;
+    new_wavelength *= wavelengths_scale_factor;
+
+    while(reflectances_index < properties.bands) {
+        
+        read_wavelength = properties.wavelengths[wavelengths_index];
+        previous_diff = abs(read_wavelength - previous_wavelength);
+        new_diff = abs(read_wavelength - new_wavelength);
+
+        if(previous_diff < new_diff) {
             reflectances[reflectances_index++] = previous_reflectance;
             wavelengths_index += iterate;
         }
-        
-        previous_diff = diff;
-        previous_reflectance = reflectance;
+        else {
+            if(!getline(file, line))
+                break;
+            istringstream line_stream(line);
+
+            previous_wavelength = new_wavelength;
+            previous_reflectance = new_reflectance;
+            line_stream >> new_wavelength >> new_reflectance;
+            new_wavelength *= wavelengths_scale_factor;
+        }
     }
+
+    while(reflectances_index < (properties.bands))
+        reflectances[reflectances_index++] = previous_reflectance;
 }
 
 
@@ -284,7 +317,7 @@ namespace ENVI_reader {
             refl = static_cast<float>(data);
             
             if(refl < 0)
-                refl = 0;
+                refl = refl * -1.0f; //if the reflectance is negative it is set to positive
 
             img[index++] = refl;
         }

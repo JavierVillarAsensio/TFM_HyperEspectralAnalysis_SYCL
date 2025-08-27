@@ -28,6 +28,15 @@ value map(const string key, unordered_map<string, value> mapper){
         return mapped->second;
 }
 
+template<typename T>
+void initialize_pointer(T*& ptr, size_t ptr_size, bool set_values = false, float value = FLOAT_MAX) {
+    ptr = (T*)malloc(ptr_size * sizeof(T));
+
+    if(set_values)
+        for(size_t i = 0; i < ptr_size; i++)
+            ptr[i] = value;
+}
+
 namespace Analyzer_tools {
 
     Analyzer_properties initialize_analyzer(int argc, char** argv) {
@@ -217,4 +226,156 @@ namespace Analyzer_tools {
 
         return EXIT_SUCCESS;
     }
+
+    exit_code initialize(Analyzer_tools::Analyzer_properties& analyzer_properties, sycl::queue& device_q, int argc, char** argv) {
+    cout << "Reading program execution options..." << endl;
+
+    analyzer_properties = Analyzer_tools::initialize_analyzer(argc, argv);
+    if(analyzer_properties.image_hdr_folder_path == nullptr || analyzer_properties.specrums_folder_path == nullptr) {
+        cerr << "ERROR: Error initializing analyzer. Aborting..." << endl;
+        return EXIT_FAILURE;
+    }
+
+    if(Analyzer_tools::initialize_SYCL_queue(analyzer_properties, device_q)) {
+        cerr << "ERROR: Error initializing SYCL. Aborting..." << endl;
+        return EXIT_FAILURE;
+    }
+
+    cout << "Program execution options read with no errors." << endl;
+    return EXIT_SUCCESS;
+}
+
+    exit_code read_hdr(Analyzer_tools::Analyzer_properties& analyzer_properties) {
+    cout << "Reading .hdr ENVI header file..." << endl;
+    string hdr_path = Analyzer_tools::get_filename_by_extension(analyzer_properties.image_hdr_folder_path, HDR_FILE_EXTENSION);
+    if (hdr_path.empty()){
+        cerr << "ERROR: Could not find an .hdr file in the path: " << analyzer_properties.image_hdr_folder_path << ". Aborting..." << endl;
+        return EXIT_FAILURE;
+    }
+    
+    if (ENVI_reader::read_hdr(hdr_path, analyzer_properties.envi_properties)){
+        cerr << "ERROR: Error reading .hdr file. Aborting..." << endl;
+        return EXIT_FAILURE;
+    }
+    cout << ".hdr ENVI header file read with no errors." << endl;
+    return EXIT_SUCCESS;
+}
+
+    exit_code read_hyperspectral(Analyzer_tools::Analyzer_properties& analyzer_properties, float*& img) {
+    cout << "Reading hyperespectral image..." << endl;
+    img = (float*)malloc(analyzer_properties.envi_properties.get_image_3Dsize() * sizeof(float));
+
+    switch (analyzer_properties.envi_properties.interleave) {
+        case ENVI_reader::Interleave::BIL: {
+            string img_path = Analyzer_tools::get_filename_by_extension(analyzer_properties.image_hdr_folder_path, IMG_FILE_EXTENSION);
+            if (img_path.empty()){
+                cerr << "ERROR: Could not find an .img file in the path: " << analyzer_properties.image_hdr_folder_path << ". Aborting..." << endl;
+                return EXIT_FAILURE;
+            }
+            if(ENVI_reader::read_img_bil(img, analyzer_properties.envi_properties, img_path)) {
+                cerr << "ERROR reading hyperespectral image. Aborting..." << endl;
+                free(img);
+                return EXIT_FAILURE;
+            }
+            break;
+        }
+        default:
+            cerr << "ERROR: The interleave indicated in the .hdr file is not supported. Aborting..." << endl;
+            free(img);
+            return EXIT_FAILURE;
+    }
+    cout << "Hyperespectral image read with no errors." << endl;
+    return EXIT_SUCCESS;
+}
+
+    exit_code read_spectrums(Analyzer_tools::Analyzer_properties& analyzer_properties, size_t& n_spectrums, float*& spectrums, string*& names) { 
+    cout << "Reading sprectrums files..." << endl;
+    n_spectrums = Analyzer_tools::count_spectrums(analyzer_properties.specrums_folder_path);
+    if(!n_spectrums) {
+        cerr << "ERROR: Error counting spectrums" << endl;
+        return EXIT_FAILURE;
+    }
+    spectrums = (float*)malloc(analyzer_properties.envi_properties.bands * n_spectrums * sizeof(float));
+    names = new string[n_spectrums];
+    int spectrum_index = 0;
+
+    if(Analyzer_tools::read_spectrums(analyzer_properties.specrums_folder_path, spectrums, names, analyzer_properties.envi_properties, &spectrum_index)) {
+        cerr << "ERROR: reading spectrums. Aborting..." << endl;
+        free(spectrums);
+        delete[] names;
+        return EXIT_FAILURE;
+    }
+    cout << "Spectrums files read with no errors." << endl;
+    return EXIT_SUCCESS;
+}
+
+    exit_code scale_image(sycl::queue& device_q, Analyzer_tools::Analyzer_properties& analyzer_properties, Analyzer_variant& img_d, Event_opt& img_scaled) {
+    cout << "Scaling image by reflectance scale factor..." << endl;
+    try {
+        img_scaled = Analyzer_tools::launch_kernel<Functors::ImgScaler>(device_q, img_scaled, analyzer_properties, array{img_d}, analyzer_properties.envi_properties.reflectance_scale_factor);
+    } catch (const sycl::exception &e) {
+        std::cerr << "Error when launching SYCL kernel to scale image, error message: " << e.what() << std::endl;
+        return EXIT_FAILURE;
+    }
+    cout << "Image scaled with no errors." << endl;
+    return EXIT_SUCCESS;
+}
+
+    exit_code launch_analysis(Analyzer_tools::Analyzer_properties& analyzer_properties, sycl::queue& device_q, Analyzer_variant& img_d, Analyzer_variant& spectrums_d, Analyzer_variant& results_d, Event_opt& kernel_finished) {
+        switch (analyzer_properties.algorithm){
+            case Analyzer_tools::Analyzer_algorithms::EUCLIDEAN: {
+                    using Euclidean = Functors::Euclidean<float*>;
+
+                    size_t results_size = Euclidean::get_results_size(analyzer_properties.envi_properties.lines, 
+                                                                    analyzer_properties.envi_properties.samples, 
+                                                                    analyzer_properties.envi_properties.bands, 
+                                                                    analyzer_properties.n_spectrums, 
+                                                                    analyzer_properties.ND_kernel);
+
+                    float* final_results_h;
+                    initialize_pointer(final_results_h, results_size, true, FLOAT_MAX);
+
+                    Event_opt copied_event;
+                    Analyzer_tools::copy_to_device(analyzer_properties.USE_ACCESSORS, device_q, results_d, final_results_h, results_size, &copied_event);
+
+                    kernel_finished = Analyzer_tools::launch_kernel<Functors::Euclidean>(device_q, copied_event, analyzer_properties, array{img_d, spectrums_d, results_d}, 
+                                                            analyzer_properties.n_spectrums,
+                                                            analyzer_properties.envi_properties.lines,
+                                                            analyzer_properties.envi_properties.samples,
+                                                            analyzer_properties.envi_properties.bands,
+                                                            analyzer_properties.coalescent_read_size);
+                    break;
+                }
+
+                case Analyzer_tools::Analyzer_algorithms::CCM: {
+                    using CCM = Functors::CCM<float*>;
+
+                    size_t results_size = CCM::get_results_size(analyzer_properties.envi_properties.lines, 
+                                                                    analyzer_properties.envi_properties.samples, 
+                                                                    analyzer_properties.envi_properties.bands, 
+                                                                    analyzer_properties.n_spectrums, 
+                                                                    analyzer_properties.ND_kernel);
+
+                    float* final_results_h;
+                    initialize_pointer(final_results_h, results_size, true, -1.0f);
+
+                    Event_opt copied_event;
+                    Analyzer_tools::copy_to_device(analyzer_properties.USE_ACCESSORS, device_q, results_d, final_results_h, results_size, &copied_event);
+
+                    kernel_finished = Analyzer_tools::launch_kernel<Functors::CCM>(device_q, copied_event, analyzer_properties, array{img_d, spectrums_d, results_d}, 
+                                                            analyzer_properties.n_spectrums,
+                                                            analyzer_properties.envi_properties.lines,
+                                                            analyzer_properties.envi_properties.samples,
+                                                            analyzer_properties.envi_properties.bands,
+                                                            analyzer_properties.coalescent_read_size);
+                    break;
+                }
+            default:
+                std::cout << "Error: Algorithm not implemented" << std::endl;
+                return EXIT_FAILURE;
+                break;
+        }
+
+        return EXIT_SUCCESS;
+    }    
 }

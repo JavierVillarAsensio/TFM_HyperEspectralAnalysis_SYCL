@@ -52,7 +52,7 @@ namespace Functors {
         ImgScaler(Data_access img_in, int reflectance_scale_factor, Local_mem_wrapper local_mem_wrapped_in) : scale_factor(reflectance_scale_factor/100), img_d(img_in) {}
 
         inline static constexpr size_t get_n_access_points() { return 1; }
-        inline static const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return lines * cols * n_spectrums;}
+        inline static const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return lines * cols * bands;}
         inline static const size_t get_results_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool nd) { return lines * cols; }
         inline static constexpr bool has_ND() { return false; }
 
@@ -99,7 +99,7 @@ namespace Functors {
         //kernel for basic
         void operator()(sycl::id<1> id) const {
             
-            size_t wi_id = id[0];
+            size_t wi_id = id.get(0);
             
             size_t img_2D_size = this->n_lines * this->n_cols;
 
@@ -146,6 +146,8 @@ namespace Functors {
                     diff = this->img_d[img_offset + (i * this->n_cols)] - this->spectrums_d[spectrum_offset + i];
                     sum += diff * diff;
                 }
+
+                
                 
                 //                                                                                                                                       where the lowest value is stored
                 sycl::atomic_ref<float, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> lowest_distance(this->results_d[group_id]);
@@ -157,7 +159,8 @@ namespace Functors {
                 
                 read_distance = this->results_d[group_id];
                 if(std::fabs(sum - read_distance) < 0.0001)
-                    lowest_distance.store(local_id);    //store the index of the nearest spectrum  
+                    lowest_distance.store(local_id);    //store the index of the nearest spectrum
+
             } 
 
             else {      //if local memory is used, use the 1D kernel with local memory
@@ -248,6 +251,94 @@ namespace Functors {
 
             this->results_d[result_pixel_index] = lowest_index;
         }*/
+    };
+
+    template<typename Data_access>
+    struct CCM : BaseFunctor<Data_access>{  
+        CCM(Data_access img_in, 
+            Data_access spectrums_in, 
+            Data_access results_in, 
+            size_t n_spectrums_in,
+            size_t n_lines_in,
+            size_t n_cols_in,
+            size_t bands_size_in,
+            size_t coalesced_memory_width_in,
+            Local_mem_wrapper local_mem_wrapped_in)
+            : BaseFunctor<Data_access>(img_in, spectrums_in, results_in, n_spectrums_in, n_lines_in, n_cols_in, bands_size_in, coalesced_memory_width_in, local_mem_wrapped_in) {}
+
+        inline static size_t get_results_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool nd) { 
+            if(nd)
+                return lines * cols;
+            else
+                return lines * cols * 2; 
+        }
+
+        inline static size_t get_range_global_size(size_t lines, size_t cols, size_t n_bands, size_t n_spectrums, bool has_local_mem) { 
+            if(has_local_mem)
+                return lines * cols; 
+            else
+                return lines * cols * n_spectrums;
+        }
+
+        inline static size_t get_range_local_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { 
+            if(has_local_mem)
+                return cols; 
+            else
+                return n_spectrums;
+        }
+
+        inline static size_t get_local_mem_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums) { return (cols * bands * sizeof(float)) + (n_spectrums * bands * sizeof(float)); }
+            
+        void operator()(sycl::id<1> id) const {
+            this->results_d[id] = -1;  //initialize the coefficient to -1 (lowest possible value)
+        }
+
+        //kernel for ND
+        void operator()(sycl::nd_item<1> id) const {
+            size_t group_id = id.get_group_linear_id();
+            size_t local_id = id.get_local_linear_id();
+
+            //bil img offset              line                          line size                     group sample
+            size_t img_offset = ((group_id / this->n_cols) * (this->n_cols * this->bands_size)) + (group_id % this->n_cols);
+            size_t spectrum_offset = local_id * this->bands_size;
+
+            float sum_pixel_values = 0, sum_reference_values = 0;
+            float sum_sqrd_pixel_values = 0, sum_sqrd_reference_values = 0;
+            float sum_pixel_by_reference_values = 0;
+
+            float pixel_value, spectrum_value;
+
+            for(size_t i = 0; i < this->bands_size; i++) {
+                pixel_value = this->img_d[img_offset + (i * this->n_cols)];
+                spectrum_value = this->spectrums_d[spectrum_offset + i];
+
+                sum_pixel_values += pixel_value;
+                sum_reference_values += spectrum_value;
+
+                sum_sqrd_pixel_values += pixel_value * pixel_value;
+                sum_sqrd_reference_values += spectrum_value * spectrum_value;
+
+                sum_pixel_by_reference_values += pixel_value * spectrum_value;
+            }
+
+            //Pearson correlation coefficient formula
+            float numerator = this->bands_size * sum_pixel_by_reference_values - sum_pixel_values * sum_reference_values;
+            float denominator = sycl::sqrt((this->bands_size * sum_sqrd_pixel_values - sum_pixel_values * sum_pixel_values) * (this->bands_size * sum_sqrd_reference_values - sum_reference_values * sum_reference_values));
+
+            float correlation = numerator / denominator;
+            
+            //                                                                                                                                                  where the highest value is stored
+            sycl::atomic_ref<float, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> highest_coefficient(this->results_d[group_id]);
+            float read_coefficient = highest_coefficient.load();
+            while(correlation > read_coefficient)
+                highest_coefficient.compare_exchange_weak(read_coefficient, correlation, sycl::memory_order::relaxed);
+
+            id.barrier();   //the lowest value is already in the results
+            
+            read_coefficient = this->results_d[group_id];
+            if(std::fabs(correlation - read_coefficient) < 0.0000001)   //tolerance for float comparison
+                highest_coefficient.store(local_id);    //store the index of the nearest spectrum
+        }
     };
 };
 

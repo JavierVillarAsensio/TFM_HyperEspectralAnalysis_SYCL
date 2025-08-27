@@ -1,7 +1,18 @@
-/*
-#include <Analyzer_tools.h>
+#include <Analyzer_tools.hpp>
 #include <iostream>
-#include <Functors.h>
+#include <Functors.hpp>
+#include <Results_writer.hpp>
+
+#define OUTPUT_FOLDER "output/"
+
+//spectrum needed fields for reading Jasper Ridge files
+#define SPECTRUM_N_NEEDED_FIELDS 4
+#define SPECTRUM_FIRST_VALUE_FIELD "First X Value"
+#define SPECTRUM_LAST_VALUE_FIELD "Last X Value" 
+#define SPECTRUM_WAVELENGTH_UNIT_FIELD "X Units"
+#define SPECTRUM_NAME_FIELD "Name"
+
+#define MICROMETERS_IN_A_METER 1000000 //for jasper ridge files
 
 using namespace std;
 
@@ -10,88 +21,52 @@ void free_malloc_resources(sycl::event event, Ptrs... ptrs) { event.wait(); ( fr
 template<typename... Ptrs>
 void free_USM_resources(sycl::queue& q, Ptrs... ptrs) { (sycl::free(std::get<float*>(ptrs), q), ...); }
 
-exit_code initialize(Analyzer_tools::Analyzer_properties& analyzer_properties, sycl::queue& device_q, int argc, char** argv) {
-    cout << "Reading program execution options..." << endl;
-
-    analyzer_properties = Analyzer_tools::initialize_analyzer(argc, argv);
-    if(analyzer_properties.image_hdr_folder_path == nullptr || analyzer_properties.specrums_folder_path == nullptr) {
-        cerr << "ERROR: Error initializing analyzer. Aborting..." << endl;
-        return EXIT_FAILURE;
-    }
-
-    if(Analyzer_tools::initialize_SYCL_queue(analyzer_properties, device_q)) {
-        cerr << "ERROR: Error initializing SYCL. Aborting..." << endl;
-        return EXIT_FAILURE;
-    }
-
-    cout << "Program execution options read with no errors." << endl;
-    return EXIT_SUCCESS;
-}
-
-exit_code read_hdr(Analyzer_tools::Analyzer_properties& analyzer_properties, ENVI_reader::ENVI_properties& envi_properties) {
-    cout << "Reading .hdr ENVI header file..." << endl;
-    string hdr_path = Analyzer_tools::get_filename_by_extension(analyzer_properties.image_hdr_folder_path, HDR_FILE_EXTENSION);
-    if (hdr_path.empty()){
-        cerr << "ERROR: Could not find an .hdr file in the path: " << analyzer_properties.image_hdr_folder_path << ". Aborting..." << endl;
-        return EXIT_FAILURE;
-    }
-    
-    if (ENVI_reader::read_hdr(hdr_path, &envi_properties)){
-        cerr << "ERROR: Error reading .hdr file. Aborting..." << endl;
-        return EXIT_FAILURE;
-    }
-    cout << ".hdr ENVI header file read with no errors." << endl;
-    return EXIT_SUCCESS;
-}
-
-exit_code read_hyperspectral(Analyzer_tools::Analyzer_properties& analyzer_properties, ENVI_reader::ENVI_properties& envi_properties, float*& img) {
-    cout << "Reading hyperespectral image..." << endl;
-    img = (float*)malloc(envi_properties.get_image_3Dsize() * sizeof(float));
-
-    switch (envi_properties.interleave) {
-        case ENVI_reader::Interleave::BIL: {
-            string img_path = Analyzer_tools::get_filename_by_extension(analyzer_properties.image_hdr_folder_path, IMG_FILE_EXTENSION);
-            if (img_path.empty()){
-                cerr << "ERROR: Could not find an .img file in the path: " << analyzer_properties.image_hdr_folder_path << ". Aborting..." << endl;
-                return EXIT_FAILURE;
-            }
-            if(ENVI_reader::read_img_bil(img, &envi_properties, img_path)) {
-                cerr << "ERROR reading hyperespectral image. Aborting..." << endl;
-                free(img);
-                return EXIT_FAILURE;
-            }
-            break;
-        }
-        default:
-            cerr << "ERROR: The interleave indicated in the .hdr file is not supported. Aborting..." << endl;
-            free(img);
-            return EXIT_FAILURE;
-    }
-    cout << "Hyperespectral image read with no errors." << endl;
-    return EXIT_SUCCESS;
-}
-
-exit_code read_spectrums(Analyzer_tools::Analyzer_properties& analyzer_properties, ENVI_reader::ENVI_properties& envi_properties, float*& img,  
-                         size_t& n_spectrums, float*& spectrums, string*& names) {
-    cout << "Reading sprectrums files..." << endl;
-    n_spectrums = Analyzer_tools::count_spectrums(analyzer_properties.specrums_folder_path);
-    if(!n_spectrums) {
-        cerr << "ERROR: Error counting spectrums" << endl;
-        free(img);
-        return EXIT_FAILURE;
-    }
-    spectrums = (float*)malloc(envi_properties.bands * n_spectrums * sizeof(float));
-    names = new string[n_spectrums];
+exit_code read_spectrums_JasperRidge(Analyzer_tools::Analyzer_properties& p, float*& reflectances, string*& names, size_t& n_spectrums){
     int spectrum_index = 0;
+    names = new string[4];
+    reflectances = (float*)malloc(4 * p.envi_properties.bands * sizeof(float));
+    for (const auto& entry : filesystem::directory_iterator(p.specrums_folder_path)) {
+        if(entry.is_regular_file()) {
+            ifstream file(entry.path());
+            if(!file.is_open()){
+                cerr << "Error opening the spectrum file: " << entry.path() << " it could not be opened. Aborting." << endl;
+                return(EXIT_FAILURE);
+            }
 
-    if(Analyzer_tools::read_spectrums(analyzer_properties.specrums_folder_path, spectrums, names, envi_properties, &spectrum_index)) {
-        cerr << "ERROR: reading spectrums. Aborting..." << endl;
-        free(img);
-        free(spectrums);
-        delete[] names;
-        return EXIT_FAILURE;
+            string line, segment;
+
+            getline(file, line);
+            istringstream line_stream(line);
+            getline(line_stream, segment, ':');
+            getline(line_stream, segment, ':');
+            names[spectrum_index] = segment.substr(segment.find_first_not_of(" "));
+
+            streampos pos;
+            float wavelength, reflectance;
+
+            while(true) {   //move to the reflectances section
+                pos = file.tellg();
+
+                getline(file, line);
+                istringstream line_stream(line);
+                if((line_stream >> wavelength >> reflectance)) {
+                    file.seekg(pos);
+                    break;
+                }
+            }
+
+            size_t reflectances_init_pos = spectrum_index * p.envi_properties.bands;
+            for(size_t i = 0; i < p.envi_properties.bands; i++) { //read reflectances
+                getline(file, line);
+                istringstream line_stream(line);
+                line_stream >> wavelength >> reflectance;
+                reflectances[i + reflectances_init_pos] = reflectance*100;
+            }
+        }
+        spectrum_index++;
     }
-    cout << "Spectrums files read with no errors." << endl;
+    n_spectrums = spectrum_index; 
+
     return EXIT_SUCCESS;
 }
 
@@ -99,63 +74,113 @@ int main(int argc, char* argv[]) {
     ////////////////////////////////Initialize////////////////////////////////
     Analyzer_tools::Analyzer_properties analyzer_properties;
     sycl::queue device_q;
-    if(initialize(analyzer_properties, device_q, argc, argv))
+    if(Analyzer_tools::initialize(analyzer_properties, device_q, argc, argv))
         return EXIT_FAILURE;
 
-    variant<float*, sycl::buffer<float, 1>> img_d;
-    variant<float*, sycl::buffer<float, 1>> spectrums_d;
-    variant<float*, sycl::buffer<float, 1>> results_d;
-
+    Analyzer_variant img_d;
+    Analyzer_variant spectrums_d;
+    Analyzer_variant results_d;
 
     /////////////////////////////////Read .hdr////////////////////////////////
-    ENVI_reader::ENVI_properties envi_properties;
-    if(read_hdr(analyzer_properties, envi_properties))
+    if(Analyzer_tools::read_hdr(analyzer_properties))
         return EXIT_FAILURE;
     
-
     ///////////////////////Read hyperspectral image//////////////////////////
     float* img_h;
-    if(read_hyperspectral(analyzer_properties, envi_properties, img_h))
+    if(Analyzer_tools::read_hyperspectral(analyzer_properties, img_h))
         return EXIT_FAILURE;
-
 
     ///////////////////////Copy hyperspectral image//////////////////////////
-    optional<sycl::event> opt_img_copied;
-    if(Analyzer_tools::copy_to_device(analyzer_properties.USE_ACCESSORS, device_q, img_d, img_h, envi_properties.get_image_3Dsize(), &opt_img_copied))
+    Event_opt opt_img_copied;
+    if(Analyzer_tools::copy_to_device(analyzer_properties.USE_ACCESSORS, device_q, img_d, img_h, analyzer_properties.envi_properties.get_image_3Dsize(), &opt_img_copied))
         return EXIT_FAILURE;
-    
+
+    //////////////////////////////Scale img///////////////////////////////////
+    Event_opt img_scaled;
+    if(opt_img_copied.has_value())
+        img_scaled = opt_img_copied.value();
+    scale_image(device_q, analyzer_properties, img_d, img_scaled);
 
     ////////////////////////////Read spectrums////////////////////////////////
     size_t n_spectrums;
     float* spectrums_h;
     string* names;
-    if(read_spectrums(analyzer_properties, envi_properties, img_h, n_spectrums, spectrums_h, names))
+
+    /*
+    //ENVI files
+    if(Analyzer_tools::read_spectrums(analyzer_properties, n_spectrums, spectrums_h, names))
         return EXIT_FAILURE;
+    */
 
-
-    ////////////////////////////Copy spectrums////////////////////////////////
-    optional<sycl::event> opt_spectrums_copied;
-    if(Analyzer_tools::copy_to_device(analyzer_properties.USE_ACCESSORS, device_q, spectrums_d, spectrums_h, n_spectrums * envi_properties.bands, &opt_spectrums_copied))
+    
+    //Jasper Ridge files
+    if(read_spectrums_JasperRidge(analyzer_properties, spectrums_h, names, n_spectrums))
         return EXIT_FAILURE;
-
-
-    //////////////////////////////Scale img///////////////////////////////////
-    sycl::event img_scaled;
-    sycl::range<1> scaler_range(envi_properties.get_image_3Dsize());
-    Analyzer_tools::launch_kernel_with_variants<Functors::ImgScaler, sycl::range<1>, variant<float*, sycl::buffer<float, 1>>>
-                    (device_q, scaler_range, opt_spectrums_copied, img_d, envi_properties.reflectance_scale_factor);
-
-    /////////////////////////////launch kernel////////////////////////////////
-    size_t results_size = envi_properties.samples * envi_properties.lines;
-    float* results_h = (float*)malloc(envi_properties.get_image_2Dsize() * sizeof(float));
-    for(int i = 0; i < results_size; i++) 
-        results_h[i] = 0;
     
 
-    free_malloc_resources(opt_spectrums_copied.value(), img_h, spectrums_h, results_h);
-    device_q.wait();
-    if(!analyzer_properties.USE_ACCESSORS)
-        free_USM_resources(device_q, img_d, spectrums_d);
+    free(img_h);
+    analyzer_properties.n_spectrums = n_spectrums;
 
+    ////////////////////////////Copy spectrums////////////////////////////////
+    Event_opt opt_spectrums_copied;
+    cout << "Copying spectrums to device..." << endl;
+    if(Analyzer_tools::copy_to_device(analyzer_properties.USE_ACCESSORS, device_q, spectrums_d, spectrums_h, n_spectrums * analyzer_properties.envi_properties.bands, &opt_spectrums_copied)) {
+        cout << "ERROR: copying spectrums to device. Aborting..." << endl;
+        return EXIT_FAILURE;
+    }
+    cout << "Spectrums copied to device with no errors." << endl;
+    
+
+    /////////////////////////////launch kernel////////////////////////////////
+    analyzer_properties.device_local_memory = 1; // local memory causes crash, needs investigation
+    Event_opt kernel_finished;
+    cout << "Launching analysis kernel..." << endl;
+    if(Analyzer_tools::launch_analysis(analyzer_properties, device_q, img_d, spectrums_d, results_d, kernel_finished)) {
+        cout << "ERROR: launching analysis kernel. Aborting..." << endl;
+        return EXIT_FAILURE;
+    }
+    cout << "Analysis kernel launched with no errors." << endl;
+
+    /////////////////////////////write results////////////////////////////////
+    size_t img_2Dsize = analyzer_properties.envi_properties.get_image_2Dsize();
+    Event_opt results_back;
+    float* final_results_h = (float*)malloc(img_2Dsize * sizeof(float));
+    int *nearest_materials_image = (int*)malloc(img_2Dsize * sizeof(int));
+    const char* output_file_name = strrchr(analyzer_properties.image_hdr_folder_path, '/') + 1;
+    string output_path = OUTPUT_FOLDER + string(output_file_name);
+    output_file_name = output_path.c_str();
+
+    if(kernel_finished.has_value())
+        kernel_finished.value().wait();
+
+
+    cout << "Copying results from device to host..." << endl;
+    if(Analyzer_tools::copy_from_device(analyzer_properties.USE_ACCESSORS, device_q, final_results_h, results_d, img_2Dsize, &results_back)) {
+        cout << "ERROR: copying results from device to host. Aborting..." << endl;
+        free(final_results_h);
+        free(nearest_materials_image);
+        return EXIT_FAILURE;
+    }
+    cout << "Results copied from device to host with no errors." << endl;
+
+    if(results_back.has_value())
+        results_back.value().wait(); 
+
+    for(size_t i = 0; i < img_2Dsize; i++)
+        nearest_materials_image[i] = (int)final_results_h[i];
+
+    free(final_results_h);
+    free(spectrums_h);
+    
+    cout << "Creating results files..." << endl;
+    if(create_results(output_file_name, nearest_materials_image, analyzer_properties.envi_properties.samples, analyzer_properties.envi_properties.lines, names, analyzer_properties.n_spectrums)) {
+        cout << "ERROR: creating results files. Aborting..." << endl;
+        free(nearest_materials_image);
+        return EXIT_FAILURE;
+    }
+    cout << "Results files created with no errors." << endl;
+    free(nearest_materials_image);
+    delete[] names;
+    
     return EXIT_SUCCESS;
-}*/
+}

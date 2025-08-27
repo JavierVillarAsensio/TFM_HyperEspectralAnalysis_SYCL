@@ -6,6 +6,8 @@
 
 using namespace std;
 
+#define DO_NOT_SET_VALUES false
+
 Analyzer_tools::Analyzer_properties analyzer_properties;
 float* img_h = nullptr;
 float* spectrums_h = nullptr;
@@ -25,11 +27,12 @@ void free_resources() {
 }
 
 template<typename T>
-void initialize_pointer(T*& ptr, size_t ptr_size, float value = FLOAT_MAX) {
+void initialize_pointer(T*& ptr, size_t ptr_size, bool set_values = true, float value = FLOAT_MAX) {
     ptr = (float*)malloc(ptr_size * sizeof(T));
 
-    for(size_t i = 0; i < ptr_size; i++)
-        ptr[i] = value;
+    if(set_values)
+        for(size_t i = 0; i < ptr_size; i++)
+            ptr[i] = value;
 }
 
 exit_code check_result_img(float* ptr) {
@@ -326,7 +329,6 @@ exit_code test_basic_euclidean() {
                                                        analyzer_properties.coalescent_read_size).wait();
         
     float* result_img = (float*)malloc(img_2Dsize * sizeof(float));
-    Result_variant final_results_var = result_img;
     Analyzer_tools::copy_from_device(false, device_q, final_results_h, results_d, img_2Dsize * 2, &copied_event);
     copied_event.value().wait();
 
@@ -374,6 +376,45 @@ exit_code test_ND_euclidean() {
     return return_value;
 }
 
+exit_code test_ND_CCM() {
+    size_t temp_local_mem = analyzer_properties.device_local_memory;
+    analyzer_properties.device_local_memory = 0;
+    size_t results_size = Functors::CCM<float*>::get_results_size(analyzer_properties.envi_properties.lines, 
+                                                                               analyzer_properties.envi_properties.samples, 
+                                                                               analyzer_properties.envi_properties.bands, 
+                                                                               N_TEST_SPECTRUM_FILES, 
+                                                                               analyzer_properties.ND_kernel);
+
+    float* results_h;
+    initialize_pointer(results_h, results_size, DO_NOT_SET_VALUES);
+    
+    Analyzer_variant results_d = sycl::malloc_device<float>(results_size, device_q);
+
+    Analyzer_tools::copy_to_device(false, device_q, results_d, results_h, results_size, &copied_event);
+    
+    Analyzer_tools::launch_kernel<Functors::CCM>(device_q, copied_event, analyzer_properties, array{img_d, spectrums_d, results_d}, 
+                                                       analyzer_properties.n_spectrums,
+                                                       analyzer_properties.envi_properties.lines,
+                                                       analyzer_properties.envi_properties.samples,
+                                                       analyzer_properties.envi_properties.bands,
+                                                       analyzer_properties.coalescent_read_size).wait();
+
+    Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, results_size, &copied_event);
+    copied_event.value().wait();
+
+    for(size_t i = 0; i < IMG_2D_SIZE; i++)
+        cout << results_h[i] << " " ;
+    cout << endl;
+
+    exit_code return_value = check_result_img(results_h);
+    
+    sycl::free(get<float*>(results_d), device_q);
+    free(results_h);
+
+    analyzer_properties.device_local_memory = temp_local_mem;
+    return return_value;
+}
+
 exit_code test_ND_localMem_euclidean() {
     size_t results_size = Functors::Euclidean<float*>::get_results_size(analyzer_properties.envi_properties.lines, 
                                                                                analyzer_properties.envi_properties.samples, 
@@ -408,6 +449,7 @@ exit_code test_ND_localMem_euclidean() {
 void kernel_tests(int& tests_done, int& tests_passed) {
     test(test_basic_euclidean, "basic euclidean kernel", tests_passed, tests_done);
     test(test_ND_euclidean, "ND euclidean kernel", tests_passed, tests_done);
+    test(test_ND_CCM, "ND CCM kernel", tests_passed, tests_done);
     //test(test_ND_localMem_euclidean, "ND with local memory euclidean kernel", tests_passed, tests_done);
 }
 

@@ -3,6 +3,7 @@ test_binary = Test
 
 include_folder = ./Analyzer/include
 cpp_folder = ./Analyzer/code
+analyzer_JR_folder = ./Analyzer/jasperRidge2_R198
 object_files_folder = ./Analyzer/object_files
 
 JR_folder = /jasperRidge2_R198
@@ -15,9 +16,11 @@ include_test = -I./Analyzer/test
 output_folder = ./output
 
 given_spectrums_folder = ./spectrums/given_spectrums
+test_spectrums_folder = ./spectrums/test_materials
 
 cxx = icpx -std=c++20 -fsycl -I$(include_folder)
 precompiled = $(object_files_folder)/ENVI_reader.o $(object_files_folder)/Analyzer_tools.o $(object_files_folder)/Results_writer.o
+analyzer_precompiled = $(precompiled) $(object_files_folder)/Analyzer.o
 test_precompiled = $(precompiled) $(object_files_folder)/tests.o
 
 
@@ -36,6 +39,9 @@ $(object_files_folder)/Analyzer_tools.o: $(cpp_folder)/Analyzer_tools.cpp $(incl
 $(object_files_folder)/tests.o: $(test_folder)/tests.cpp $(include_folder)/Analyzer_tools.hpp $(include_folder)/ENVI_reader.hpp $(include_folder)/Functors.hpp $(include_folder)/Results_writer.hpp | $(object_files_folder)
 	$(cxx) $(include_test) -c $< -o $@
 
+$(object_files_folder)/Analyzer.o: $(cpp_folder)/Analyzer.cpp $(include_folder)/Analyzer_tools.hpp $(include_folder)/ENVI_reader.hpp $(include_folder)/Functors.hpp $(include_folder)/Results_writer.hpp | $(object_files_folder)
+	$(cxx) -c $< -o $@
+
 
 
 # ----------------------- compilations ---------------------- #
@@ -44,11 +50,22 @@ $(test_binary): $(test_precompiled)
 	$(MAKE) clean
 	$(cxx) $^ -o $@
 
+$(binary): $(analyzer_precompiled) 
+	$(MAKE) clean
+	$(cxx) $^ -o $@
+
+
 
 # --------------------------- run --------------------------- #
 
 run_test: $(test_binary)
 	./$(test_binary) -s $(test_folder)$(test_spectrums) -i $(test_folder)$(JR_folder)$(test_folder_extension)
+
+run_Analyzer: $(binary)
+	./$(binary) -s $(test_spectrums_folder) -i $(analyzer_JR_folder)
+
+run_Analyzer_JR: $(binary)
+	./$(binary) -s $(given_spectrums_folder) -i $(analyzer_JR_folder) -a CCM
 
 
 

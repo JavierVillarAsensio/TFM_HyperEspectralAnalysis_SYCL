@@ -118,6 +118,8 @@ namespace Analyzer_tools {
                 });
             } catch (const sycl::exception &e) {
                 std::cerr << "Error when launching SYCL kernel, error message: " << e.what() << std::endl;
+            } catch (const std::exception &e) {
+                std::cerr << "Error when launching functor, error message: " << e.what() << std::endl;
             }
             return sycl::event {};
         }
@@ -145,6 +147,12 @@ namespace Analyzer_tools {
     exit_code initialize_SYCL_queue(Analyzer_tools::Analyzer_properties& properties, sycl::queue& q);
     exit_code copy_to_device(bool use_accessors, sycl::queue& device_q, Analyzer_variant& ptr_d, float* ptr_h, size_t copy_size, Event_opt* copied = nullptr);
     exit_code copy_from_device(bool use_accessors, sycl::queue& device_q, float* ptr_h, Analyzer_variant& ptr_d, size_t copy_size, Event_opt* copied = nullptr);
+    exit_code initialize(Analyzer_tools::Analyzer_properties& analyzer_properties, sycl::queue& device_q, int argc, char** argv);
+    exit_code read_hdr(Analyzer_tools::Analyzer_properties& analyzer_properties);
+    exit_code read_hyperspectral(Analyzer_tools::Analyzer_properties& analyzer_properties, float*& img);
+    exit_code read_spectrums(Analyzer_tools::Analyzer_properties& analyzer_properties, size_t& n_spectrums, float*& spectrums, std::string*& names);
+    exit_code scale_image(sycl::queue& device_q, Analyzer_tools::Analyzer_properties& analyzer_properties, Analyzer_variant& img_d, Event_opt& img_scaled);
+    exit_code launch_analysis(Analyzer_tools::Analyzer_properties& analyzer_properties, sycl::queue& device_q, Analyzer_variant& img_d, Analyzer_variant& spectrums_d, Analyzer_variant& results_d, Event_opt& kernel_finished);
 
     template<template <typename> typename Functor, typename... Args>
     inline sycl::event launch_kernel(sycl::queue& device_q, Event_opt& opt_dependency, Analyzer_properties& p, std::array<Analyzer_variant, Functor<float*>::get_n_access_points()>&& variants, Args... args) {
