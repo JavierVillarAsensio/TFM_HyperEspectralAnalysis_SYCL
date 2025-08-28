@@ -15,22 +15,41 @@ float* final_results_h = nullptr;
 Analyzer_variant img_d;
 Analyzer_variant spectrums_d;
 string* names = nullptr;
-sycl::queue device_q;
-optional<sycl::event> copied_event;
 
-void free_resources() {
-    free(img_h);
-    free(spectrums_h);
-    delete[] names;
-    sycl::free(get<float*>(img_d), device_q);
-    sycl::free(get<float*>(spectrums_d), device_q);
+Analyzer_tools::Analyzer_properties analyzer_properties_CCM;
+float* img_h_CCM = nullptr;
+float* spectrums_h_CCM = nullptr;
+Analyzer_variant img_d_CCM;
+Analyzer_variant spectrums_d_CCM;
+
+sycl::queue device_q;
+Event_opt copied_event;
+
+template<typename... Args>
+void free_resources(Args... args) {
+    (void)std::initializer_list<int>{
+        (
+            [] (auto ptr) {
+                if constexpr (is_same_v<decltype(ptr), float*>) {
+                    free(ptr);
+                }
+                else if constexpr (is_same_v<decltype(ptr), string*>) {
+                    delete[] ptr;
+                }
+                else if constexpr (is_same_v<decltype(ptr), Analyzer_variant>){
+                    sycl::free(std::get<float*>(ptr), device_q);
+                }
+            }(args),
+            0
+        )...
+    };
 }
 
 Analyzer_tools::Analyzer_properties deep_copy_analyzer_properties(const Analyzer_tools::Analyzer_properties& source) {
     Analyzer_tools::Analyzer_properties dest;
 
     // Copia directa de campos triviales
-    dest.specrums_folder_path = source.specrums_folder_path;  // Si quieres copiar el string literal o const char*, no duplicas
+    dest.specrums_folder_path = source.specrums_folder_path;
     dest.image_hdr_folder_path = source.image_hdr_folder_path;
     dest.algorithm = source.algorithm;
     dest.device = source.device;
@@ -53,16 +72,28 @@ Analyzer_tools::Analyzer_properties deep_copy_analyzer_properties(const Analyzer
     dst_env.interleave = src_env.interleave;
     dst_env.wavelength_unit = src_env.wavelength_unit;
     dst_env.reflectance_scale_factor = src_env.reflectance_scale_factor;
-
-    // Copia profunda del array de wavelengths
-    if (src_env.wavelengths != nullptr && src_env.bands > 0) {
-        dst_env.wavelengths = new float[src_env.bands];
-        std::copy(src_env.wavelengths, src_env.wavelengths + src_env.bands, dst_env.wavelengths);
-    } else {
-        dst_env.wavelengths = nullptr;
-    }
-
+    dst_env.wavelengths = nullptr;  //el destructor libera el puntero, en la copia ya no interesa
+    
     return dest;
+}
+
+void initialize_CCM() {
+    analyzer_properties_CCM = deep_copy_analyzer_properties(analyzer_properties);
+    analyzer_properties_CCM.algorithm = Analyzer_tools::CCM;
+    analyzer_properties_CCM.n_spectrums = 2;
+    analyzer_properties_CCM.ND_kernel = true;
+    analyzer_properties_CCM.coalescent_read_size = 0;
+    analyzer_properties_CCM.device_local_memory = 0;
+    analyzer_properties_CCM.envi_properties.lines = 1;
+    analyzer_properties_CCM.envi_properties.samples = 2;
+    analyzer_properties_CCM.envi_properties.bands = 2;
+
+    img_h_CCM = (float*)malloc(CCM_EXAMPLE_SIZE * sizeof(float));
+    spectrums_h_CCM = (float*)malloc(CCM_EXAMPLE_SIZE * sizeof(float));
+    for(size_t i = 0; i < CCM_EXAMPLE_SIZE; i++) {
+        img_h_CCM[i] = IMG_CCM[i];
+        spectrums_h_CCM[i] = SPECTRUMS_CCM[i];
+    }
 }
 
 template<typename T>
@@ -257,11 +288,12 @@ exit_code test_read_spectrums() {
 }
 
 exit_code test_spectrums_read_correct() {
-    float epsilon = 0.00001, diff10, diff20;
-    for (size_t i = 0; i < analyzer_properties.envi_properties.bands * N_TEST_SPECTRUM_FILES; i++){
-        diff10 = fabs(spectrums_h[i] - TEST_SPECTRUMS_CORRECT_REFLECTANCES[0]);
-        diff20 = fabs(spectrums_h[i] - TEST_SPECTRUMS_CORRECT_REFLECTANCES[1]);
-        if (!(diff10 < epsilon || diff20 < epsilon))
+    float epsilon = 0.00001, diff1, diff2;
+    size_t total_spec_reflectances = analyzer_properties.envi_properties.bands * N_TEST_SPECTRUM_FILES;
+    for (size_t i = 0; i < total_spec_reflectances; i++){
+        diff1 = fabs(spectrums_h[i] - TEST_SPECTRUMS_CORRECT_REFLECTANCES[i]);
+        diff2 = fabs(spectrums_h[i] - TEST_SPECTRUMS_CORRECT_REFLECTANCES[(i + TEST_BANDS) % total_spec_reflectances]);
+        if (!(diff1 < epsilon || diff2 < epsilon))
             return EXIT_FAILURE;
     }
 
@@ -341,16 +373,17 @@ void sycl_tests(int& tests_done, int& tests_passed) {
 
 /////////////////////////////KERNEL TESTS//////////////////////////////
 
+//Euclidean
 exit_code test_basic_euclidean() {
     bool temp_ND = analyzer_properties.ND_kernel;
     analyzer_properties.ND_kernel = false;
 
     size_t img_2Dsize = analyzer_properties.envi_properties.get_image_2Dsize();
     size_t results_size = Functors::Euclidean<float*>::get_results_size(analyzer_properties.envi_properties.lines, 
-                                                                               analyzer_properties.envi_properties.samples, 
-                                                                               analyzer_properties.envi_properties.bands, 
-                                                                               N_TEST_SPECTRUM_FILES, 
-                                                                               analyzer_properties.ND_kernel);
+                                                                        analyzer_properties.envi_properties.samples, 
+                                                                        analyzer_properties.envi_properties.bands, 
+                                                                        N_TEST_SPECTRUM_FILES, 
+                                                                        analyzer_properties.ND_kernel);
 
     initialize_pointer(final_results_h, results_size);
     
@@ -415,56 +448,6 @@ exit_code test_ND_euclidean() {
     return return_value;
 }
 
-exit_code test_ND_CCM() {
-    size_t temp_local_mem = analyzer_properties.device_local_memory;
-    analyzer_properties.device_local_memory = 0;
-
-    Analyzer_tools::Analyzer_properties analyzer_properties_CCM = deep_copy_analyzer_properties(analyzer_properties);
-    analyzer_properties_CCM.algorithm = Analyzer_tools::CCM;
-    analyzer_properties_CCM.n_spectrums = 2;
-    analyzer_properties_CCM.ND_kernel = true;
-    analyzer_properties_CCM.coalescent_read_size = 0;
-    analyzer_properties_CCM.device_local_memory = 0;
-    analyzer_properties_CCM.envi_properties.lines = 1;
-    analyzer_properties_CCM.envi_properties.samples = 2;
-    analyzer_properties_CCM.envi_properties.bands = 2;
-    
-    size_t results_size = 2;
-    float* results_h;
-    initialize_pointer(results_h, results_size, true, -1.1f);
-
-    const size_t CCM_EXAMPLE_SIZE = 4;
-    float spectrums_h_CCM[CCM_EXAMPLE_SIZE] = {2.0f, 3.0f, 10.0f, 2.0f};
-    float img_h_CCM[CCM_EXAMPLE_SIZE] = {1.0f, 10.0f, 2.0f, 1.0f};
-    
-    Analyzer_variant results_d = sycl::malloc_device<float>(results_size, device_q);
-    Analyzer_variant spectrums_d_CCM = sycl::malloc_device<float>(CCM_EXAMPLE_SIZE, device_q);
-    Analyzer_variant img_d_CCM = sycl::malloc_device<float>(CCM_EXAMPLE_SIZE, device_q);
-
-    Analyzer_tools::copy_to_device(false, device_q, results_d, results_h, results_size, &copied_event);
-    Analyzer_tools::copy_to_device(false, device_q, spectrums_d_CCM, spectrums_h_CCM, CCM_EXAMPLE_SIZE, &copied_event);
-    Analyzer_tools::copy_to_device(false, device_q, img_d_CCM, img_h_CCM, CCM_EXAMPLE_SIZE, &copied_event);
-    
-    Analyzer_tools::launch_kernel<Functors::CCM>(device_q, copied_event, analyzer_properties_CCM, array{img_d_CCM, spectrums_d_CCM, results_d}, 
-                                                       2, //2 spectrums
-                                                       1, //1 line
-                                                       2, //2 samples
-                                                       2, //2 bands
-                                                       0 //coalescent read size
-                                                       ).wait();
-
-    Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, results_size, &copied_event);
-    copied_event.value().wait();
-
-    exit_code return_value = results_h[0] == 0 && results_h[1] == 1 ? EXIT_SUCCESS : EXIT_FAILURE;
-    
-    sycl::free(get<float*>(results_d), device_q);
-    free(results_h);
-
-    analyzer_properties.device_local_memory = temp_local_mem;
-    return return_value;
-}
-
 exit_code test_ND_localMem_euclidean() {
     size_t results_size = Functors::Euclidean<float*>::get_results_size(analyzer_properties.envi_properties.lines, 
                                                                                analyzer_properties.envi_properties.samples, 
@@ -496,11 +479,92 @@ exit_code test_ND_localMem_euclidean() {
     return return_value;
 }
 
+//CCM
+exit_code test_basic_CCM() {
+    bool temp_ND = analyzer_properties_CCM.ND_kernel;
+    analyzer_properties_CCM.ND_kernel = false;
+
+    using Static_f = Functors::CCM<float*>;
+
+    size_t results_size = Static_f::get_results_size(analyzer_properties_CCM.envi_properties.lines, 
+                                                          analyzer_properties_CCM.envi_properties.samples, 
+                                                          analyzer_properties_CCM.envi_properties.bands, 
+                                                          analyzer_properties_CCM.n_spectrums,
+                                                          analyzer_properties_CCM.ND_kernel);
+
+    float* results_h;
+    initialize_pointer(results_h, results_size, true, Static_f::results_initial_value());
+
+    Analyzer_variant results_d = sycl::malloc_device<float>(results_size, device_q);
+
+    Analyzer_tools::copy_to_device(false, device_q, results_d, results_h, results_size, &copied_event);
+    Analyzer_tools::copy_to_device(false, device_q, spectrums_d_CCM, spectrums_h_CCM, CCM_EXAMPLE_SIZE, &copied_event);
+    Analyzer_tools::copy_to_device(false, device_q, img_d_CCM, img_h_CCM, CCM_EXAMPLE_SIZE, &copied_event);
+
+    Analyzer_tools::launch_kernel<Functors::CCM>(device_q, copied_event, analyzer_properties_CCM, array{img_d, spectrums_d, results_d}, 
+                                                       analyzer_properties_CCM.n_spectrums,
+                                                       analyzer_properties_CCM.envi_properties.lines,
+                                                       analyzer_properties_CCM.envi_properties.samples,
+                                                       analyzer_properties_CCM.envi_properties.bands,
+                                                       analyzer_properties_CCM.coalescent_read_size).wait();
+
+    Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, analyzer_properties_CCM.envi_properties.get_image_2Dsize(), &copied_event);
+    copied_event.value().wait();
+
+    exit_code return_value = results_h[0] == 0 && results_h[1] == 1 ? EXIT_SUCCESS : EXIT_FAILURE;
+
+    sycl::free(get<float*>(results_d), device_q);
+    free(results_h);
+
+    analyzer_properties.ND_kernel = temp_ND;
+    return return_value;                              
+}
+
+exit_code test_ND_CCM() {
+    size_t temp_local_mem = analyzer_properties_CCM.device_local_memory;
+    analyzer_properties_CCM.device_local_memory = 0;
+    
+    using Static_f = Functors::CCM<float*>;
+
+    size_t results_size = Static_f::get_results_size(analyzer_properties_CCM.envi_properties.lines, 
+                                                          analyzer_properties_CCM.envi_properties.samples, 
+                                                          analyzer_properties_CCM.envi_properties.bands, 
+                                                          analyzer_properties_CCM.n_spectrums,
+                                                          analyzer_properties_CCM.ND_kernel);
+
+    float* results_h;
+    initialize_pointer(results_h, results_size, true, -1.1f);
+
+    Analyzer_variant results_d = sycl::malloc_device<float>(results_size, device_q);
+
+    Analyzer_tools::launch_kernel<Functors::CCM>(device_q, copied_event, analyzer_properties_CCM, array{img_d, spectrums_d, results_d}, 
+                                                       analyzer_properties_CCM.n_spectrums,
+                                                       analyzer_properties_CCM.envi_properties.lines,
+                                                       analyzer_properties_CCM.envi_properties.samples,
+                                                       analyzer_properties_CCM.envi_properties.bands,
+                                                       analyzer_properties_CCM.coalescent_read_size).wait();
+
+    Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, analyzer_properties_CCM.envi_properties.get_image_2Dsize(), &copied_event);
+    copied_event.value().wait();
+
+    exit_code return_value = results_h[0] == 0 && results_h[1] == 1 ? EXIT_SUCCESS : EXIT_FAILURE;
+    
+    sycl::free(get<float*>(results_d), device_q);
+    free(results_h);
+
+    analyzer_properties_CCM.device_local_memory = temp_local_mem;
+    return return_value;
+}
+
 void kernel_tests(int& tests_done, int& tests_passed) {
     test(test_basic_euclidean, "basic euclidean kernel", tests_passed, tests_done);
     test(test_ND_euclidean, "ND euclidean kernel", tests_passed, tests_done);
-    test(test_ND_CCM, "ND CCM kernel", tests_passed, tests_done);
+    free_resources(img_h, spectrums_h, img_d, spectrums_d);
     //test(test_ND_localMem_euclidean, "ND with local memory euclidean kernel", tests_passed, tests_done);
+    initialize_CCM();
+    test(test_basic_CCM, "basic CCM kernel", tests_passed, tests_done);
+    test(test_ND_CCM, "ND CCM kernel", tests_passed, tests_done);
+    free_resources(img_h_CCM, spectrums_h_CCM, img_d_CCM, spectrums_d_CCM);
 }
 
 
@@ -519,6 +583,7 @@ exit_code test_create_results() {
 
 void results_tests(int& tests_done, int& tests_passed) {
     test(test_create_results, "create results files", tests_passed, tests_done);
+    free_resources(final_results_h, names);
 }
 
 
@@ -544,8 +609,6 @@ int main(int argc, char **argv){
         cout << "\033[31mThe number of tests passed is lower than the tests done: \033[0m" << "Tests passed: " << tests_passed << " < " "Tests done: " << tests_done << endl;
     else
         cout << "\033[32mThe number of tests passed matches the tests done: \033[0m" << "Tests passed: " << tests_passed << " == " "Tests done: " << tests_done << endl;
-
-    free_resources();
 
     return EXIT_SUCCESS;
 }

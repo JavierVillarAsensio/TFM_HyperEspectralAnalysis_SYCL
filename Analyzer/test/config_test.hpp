@@ -31,8 +31,8 @@ const ENVI_reader::Interleave TEST_INTERLEAVE = ENVI_reader::BIL;
 constexpr float TEST_WAVELENGTHS[TEST_BANDS] = {2000.0, 4000.0};
 
 ////////////IMAGE DATA////////////
+//Euclidean test image data
 constexpr size_t TEST_IMG_SIZE = TEST_BANDS * TEST_SAMPLES * TEST_LINES;
-//need variance for CCM
 constexpr short int TESTING_IMG[TEST_IMG_SIZE] = {
     415, 786,   2648, 3138,   417, 769,
     2651, 2542,  379, 883,   2547, 2892,
@@ -46,7 +46,14 @@ constexpr float TEST_SCALED_IMG[TEST_IMG_SIZE] = {
 const size_t TESTING_IMG_N_ELEMENTS = sizeof(TESTING_IMG) / sizeof(short int);
 const size_t IMG_2D_SIZE = TEST_SAMPLES * TEST_LINES;
 
-////////////SPECTRUMS DATA////////////
-constexpr float TEST_SPECTRUMS_CORRECT_REFLECTANCES[N_TEST_SPECTRUM_FILES] = {10.0, 20.0};
+constexpr float TEST_SPECTRUMS_CORRECT_REFLECTANCES[N_TEST_SPECTRUM_FILES * TEST_BANDS] = {8.49, 13.26, 17.64, 24.91};
+
+//CCM test image data
+constexpr size_t CCM_EXAMPLE_SIZE = 4;
+constexpr size_t N_TEST_CCM_SPECTRUMS = 2;
+constexpr float SPECTRUMS_CCM[CCM_EXAMPLE_SIZE] = {2.0f, 3.0f, 10.0f, 2.0f};
+constexpr float IMG_CCM[CCM_EXAMPLE_SIZE] = {1.0f, 10.0f, 2.0f, 1.0f};
+
+#define CCM_CORRECT(ptr) (ptr[0] == 0 && ptr[1] == 1 ? EXIT_SUCCESS : EXIT_FAILURE)
 
 #endif

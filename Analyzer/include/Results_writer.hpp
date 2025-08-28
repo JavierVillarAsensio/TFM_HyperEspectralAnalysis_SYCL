@@ -15,6 +15,6 @@ typedef int exit_code;
 
 const std::filesystem::path OUTPUT_FOLDER = "output";
 
-exit_code create_results(const char* results_file_name, int *nearest_materials_image, size_t width, size_t height, std::string *materials, size_t n_materials);
+exit_code create_results(const char* results_file_name, int *nearest_materials_image, size_t width, size_t height, std::string *materials, size_t n_materials, std::string times);
 
 #endif

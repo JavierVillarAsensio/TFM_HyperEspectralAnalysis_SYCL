@@ -3,6 +3,8 @@
 
 #include <sycl/sycl.hpp>
 
+#define FLOAT_MAX 3.4028235e+38
+
 struct Local_mem_wrapper {
     sycl::local_accessor<float, 1>* local_mem = nullptr;
 
@@ -41,6 +43,7 @@ namespace Functors {
         static inline const size_t get_results_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool nd) { return 0; }
         static inline const size_t get_local_mem_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums) { return 0; }
         static inline constexpr bool has_ND() { return true; }
+        static inline constexpr float results_initial_value() { return 0.f; }
 
     };
 
@@ -95,7 +98,9 @@ namespace Functors {
         }
 
         inline static size_t get_local_mem_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums) { return (cols * bands * sizeof(float)) + (n_spectrums * bands * sizeof(float)); }
-            
+          
+        static inline constexpr float results_initial_value() { return FLOAT_MAX; }
+
         //kernel for basic
         void operator()(sycl::id<1> id) const {
             
@@ -289,8 +294,57 @@ namespace Functors {
 
         inline static size_t get_local_mem_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums) { return (cols * bands * sizeof(float)) + (n_spectrums * bands * sizeof(float)); }
             
+        static inline constexpr float results_initial_value() { return -1.1f; }
+
+        //kernel for basic
         void operator()(sycl::id<1> id) const {
-            this->results_d[id] = -1;  //initialize the coefficient to -1 (lowest possible value)
+            size_t wi_id = id.get(0);
+
+            //bil img offset                      line                                   line size                                line offset
+            size_t img_offset = (this->n_cols / (wi_id / this->n_spectrums)) * (this->n_cols * this->bands_size) + (this->n_cols % (wi_id / this->n_spectrums));
+            size_t spectrum_offset = (wi_id % this->n_spectrums) * this->bands_size;
+
+            float sum_pixel_values = 0, sum_reference_values = 0;
+            float sum_sqrd_pixel_values = 0, sum_sqrd_reference_values = 0;
+            float sum_pixel_by_reference_values = 0;
+
+            float pixel_value, spectrum_value;
+
+            for(size_t i = 0; i < this->bands_size; i++) {
+                pixel_value = this->img_d[img_offset + (i * this->n_cols)];
+                spectrum_value = this->spectrums_d[spectrum_offset + i];
+
+                sum_pixel_values += pixel_value;
+                sum_reference_values += spectrum_value;
+
+                sum_sqrd_pixel_values += pixel_value * pixel_value;
+                sum_sqrd_reference_values += spectrum_value * spectrum_value;
+
+                sum_pixel_by_reference_values += pixel_value * spectrum_value;
+            }
+
+            //Pearson correlation coefficient formula
+            float numerator = this->bands_size * sum_pixel_by_reference_values - sum_pixel_values * sum_reference_values;
+            float denominator = sycl::sqrt((this->bands_size * sum_sqrd_pixel_values - sum_pixel_values * sum_pixel_values) * (this->bands_size * sum_sqrd_reference_values - sum_reference_values * sum_reference_values));
+
+            float correlation = numerator / denominator;
+            
+            size_t img_2D_size = this->n_lines * this->n_cols;
+            size_t pixel_offset = wi_id / this->n_spectrums;
+
+            this->results_d[wi_id] = wi_id;
+            /*
+            //                                                                                                                                                          where the highest value is stored
+            sycl::atomic_ref<float, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> highest_coefficient(this->results_d[img_2D_size + pixel_offset]);
+            float read_coefficient = highest_coefficient.load();
+            while(correlation > read_coefficient) {
+                if(highest_coefficient.compare_exchange_weak(read_coefficient, correlation, sycl::memory_order::relaxed)) {   //compare only if "read_distance" remains as the stored value, if so, change it
+                    sycl::atomic_ref<float, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> nearest_spectrum(this->results_d[pixel_offset]);
+                    nearest_spectrum.store(spectrum_offset / this->bands_size);
+                    break;
+                }
+                read_coefficient = highest_coefficient.load();
+            }*/
         }
 
         //kernel for ND

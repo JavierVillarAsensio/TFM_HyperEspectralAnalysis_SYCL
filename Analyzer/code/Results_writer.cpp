@@ -59,7 +59,7 @@ int write_jpg(int *nearest_materials_image, size_t width, size_t height, string 
     return EXIT_SUCCESS;
 }
 
-int write_legend(int *nearest_materials_image, size_t n_pixels, string *materials, size_t file_size, string legend_file_name){
+int write_legend(int *nearest_materials_image, size_t n_pixels, string *materials, size_t file_size, string legend_file_name, string times){
     const int n_colors = 20;
     string colors_name[n_colors] = {
         "Red",
@@ -101,12 +101,25 @@ int write_legend(int *nearest_materials_image, size_t n_pixels, string *material
         out << i+1 << ": " << materials[i] << "   =>   " << colors_name[i] << "   " << pixels_per_material[i] << "/" << n_pixels << "   " << pixels_per_material[i]*100.0/n_pixels << "% of the total pixels" << endl;
     }
 
+    const int column_width = 18;
+
+    out << endl << "Times in milliseconds:" << endl 
+    << setw(column_width) << "Initialization"
+    << setw(column_width) << "Copy img" 
+    << setw(column_width) << "Scale img" 
+    << setw(column_width) << "Copy spectrums" 
+    << setw(column_width) << "Kernel executed"
+    << setw(column_width) << "Total"
+    << endl;
+
+    out << times;
+
     free(pixels_per_material);
 
     return EXIT_SUCCESS;
 }
 
-exit_code create_results(const char* results_file_name, int *nearest_materials_image, size_t width, size_t height, string *materials, size_t n_materials){
+exit_code create_results(const char* results_file_name, int *nearest_materials_image, size_t width, size_t height, string *materials, size_t n_materials, string times){
     string results_jpg_file_name = string(results_file_name) + JPG_FILE_EXTENSION;
     string results_legend_file_name = string(results_file_name) + LEGEND_FILE_EXTENSION;
 
@@ -115,7 +128,7 @@ exit_code create_results(const char* results_file_name, int *nearest_materials_i
         return EXIT_FAILURE;
     }
 
-    if(write_legend(nearest_materials_image, width * height, materials, n_materials, results_legend_file_name)){
+    if(write_legend(nearest_materials_image, width * height, materials, n_materials, results_legend_file_name, times)){
         cerr << "An unexpected error ocurred writing the legend results file" << endl;
         return EXIT_FAILURE;
     }
