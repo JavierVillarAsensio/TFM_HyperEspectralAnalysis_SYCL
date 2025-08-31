@@ -301,7 +301,8 @@ namespace Functors {
             size_t wi_id = id.get(0);
 
             //bil img offset                      line                                   line size                                line offset
-            size_t img_offset = (this->n_cols / (wi_id / this->n_spectrums)) * (this->n_cols * this->bands_size) + (this->n_cols % (wi_id / this->n_spectrums));
+            size_t img_offset = ((wi_id / this->n_spectrums) / this->n_cols) * (this->n_cols * this->bands_size) + ((wi_id / this->n_spectrums) % this->n_cols);
+
             size_t spectrum_offset = (wi_id % this->n_spectrums) * this->bands_size;
 
             float sum_pixel_values = 0, sum_reference_values = 0;
@@ -331,20 +332,18 @@ namespace Functors {
             
             size_t img_2D_size = this->n_lines * this->n_cols;
             size_t pixel_offset = wi_id / this->n_spectrums;
-
-            this->results_d[wi_id] = wi_id;
-            /*
+            
             //                                                                                                                                                          where the highest value is stored
             sycl::atomic_ref<float, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> highest_coefficient(this->results_d[img_2D_size + pixel_offset]);
             float read_coefficient = highest_coefficient.load();
             while(correlation > read_coefficient) {
-                if(highest_coefficient.compare_exchange_weak(read_coefficient, correlation, sycl::memory_order::relaxed)) {   //compare only if "read_distance" remains as the stored value, if so, change it
+                if(highest_coefficient.compare_exchange_weak(read_coefficient, correlation, sycl::memory_order::relaxed)) {   //compare only if "read_coefficient" remains as the stored value, if so, change it
                     sycl::atomic_ref<float, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> nearest_spectrum(this->results_d[pixel_offset]);
                     nearest_spectrum.store(spectrum_offset / this->bands_size);
                     break;
                 }
                 read_coefficient = highest_coefficient.load();
-            }*/
+            }
         }
 
         //kernel for ND

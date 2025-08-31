@@ -1,5 +1,6 @@
 /Test
 /Analyzer.exe
+/bigger_images_writer
 .vscode/
 /Analyzer/object_files/
 *.txt
@@ -8,3 +9,4 @@ spectrums/3/
 spectrums/4/
 spectrums/spectrums.csv
 /output
+/Analyzer/test/jasperRidge2_R198_*

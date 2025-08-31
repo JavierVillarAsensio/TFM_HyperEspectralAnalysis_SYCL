@@ -23,7 +23,7 @@ precompiled = $(object_files_folder)/ENVI_reader.o $(object_files_folder)/Analyz
 analyzer_precompiled = $(precompiled) $(object_files_folder)/Analyzer.o
 test_precompiled = $(precompiled) $(object_files_folder)/tests.o
 
-
+image_writer_binary = bigger_images_writer
 
 # --------------------- precompilations --------------------- #
 
@@ -42,7 +42,8 @@ $(object_files_folder)/tests.o: $(test_folder)/tests.cpp $(include_folder)/Analy
 $(object_files_folder)/Analyzer.o: $(cpp_folder)/Analyzer.cpp $(include_folder)/Analyzer_tools.hpp $(include_folder)/ENVI_reader.hpp $(include_folder)/Functors.hpp $(include_folder)/Results_writer.hpp | $(object_files_folder)
 	$(cxx) -c $< -o $@
 
-
+$(object_files_folder)/write_bigger_images.o: $(test_folder)/write_bigger_images.cpp $(include_folder)/ENVI_reader.hpp | $(object_files_folder)
+	$(cxx) -c $< -o $@
 
 # ----------------------- compilations ---------------------- #
 
@@ -54,19 +55,22 @@ $(binary): $(analyzer_precompiled)
 	$(MAKE) clean
 	$(cxx) $^ -o $@
 
-
+$(image_writer_binary): $(object_files_folder)/ENVI_reader.o $(object_files_folder)/write_bigger_images.o | $(object_files_folder)
+	$(cxx) $^ -o $@
 
 # --------------------------- run --------------------------- #
 
-run_test: $(test_binary)
+run_test: $(test_binary) clean_output
 	./$(test_binary) -s $(test_folder)$(test_spectrums) -i $(test_folder)$(JR_folder)$(test_folder_extension)
 
-run_Analyzer: $(binary)
+run_Analyzer: $(binary) clean_output
 	./$(binary) -s $(test_spectrums_folder) -i $(analyzer_JR_folder)
 
-run_Analyzer_JR: $(binary)
-	./$(binary) -s $(given_spectrums_folder) -i $(analyzer_JR_folder) -a CCM
+run_Analyzer_JR: $(binary) clean_output
+	./$(binary) -s $(given_spectrums_folder) -i $(test_folder)/jasperRidge2_R198_test_x2 -a CCM
 
+run_image_writer: $(image_writer_binary) clean_output
+	./$(image_writer_binary) $(test_folder)$(JR_folder)$(test_folder_extension) $(test_folder) 2
 
 
 # -------------------------- utils -------------------------- #
@@ -83,3 +87,6 @@ clean:
 clean_all: clean
 	rm -rf $(object_files_folder)
 	rm -rf $(output_folder)
+
+clean_output:
+	rm -f $(output_folder)/*

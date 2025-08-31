@@ -501,22 +501,22 @@ exit_code test_basic_CCM() {
     Analyzer_tools::copy_to_device(false, device_q, spectrums_d_CCM, spectrums_h_CCM, CCM_EXAMPLE_SIZE, &copied_event);
     Analyzer_tools::copy_to_device(false, device_q, img_d_CCM, img_h_CCM, CCM_EXAMPLE_SIZE, &copied_event);
 
-    Analyzer_tools::launch_kernel<Functors::CCM>(device_q, copied_event, analyzer_properties_CCM, array{img_d, spectrums_d, results_d}, 
+    Analyzer_tools::launch_kernel<Functors::CCM>(device_q, copied_event, analyzer_properties_CCM, array{img_d_CCM, spectrums_d_CCM, results_d}, 
                                                        analyzer_properties_CCM.n_spectrums,
                                                        analyzer_properties_CCM.envi_properties.lines,
                                                        analyzer_properties_CCM.envi_properties.samples,
                                                        analyzer_properties_CCM.envi_properties.bands,
                                                        analyzer_properties_CCM.coalescent_read_size).wait();
 
-    Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, analyzer_properties_CCM.envi_properties.get_image_2Dsize(), &copied_event);
+    Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, results_size, &copied_event);
     copied_event.value().wait();
 
-    exit_code return_value = results_h[0] == 0 && results_h[1] == 1 ? EXIT_SUCCESS : EXIT_FAILURE;
+    exit_code return_value = CCM_CORRECT(results_h);
 
     sycl::free(get<float*>(results_d), device_q);
     free(results_h);
 
-    analyzer_properties.ND_kernel = temp_ND;
+    analyzer_properties_CCM.ND_kernel = temp_ND;
     return return_value;                              
 }
 
@@ -537,17 +537,17 @@ exit_code test_ND_CCM() {
 
     Analyzer_variant results_d = sycl::malloc_device<float>(results_size, device_q);
 
-    Analyzer_tools::launch_kernel<Functors::CCM>(device_q, copied_event, analyzer_properties_CCM, array{img_d, spectrums_d, results_d}, 
+    Analyzer_tools::launch_kernel<Functors::CCM>(device_q, copied_event, analyzer_properties_CCM, array{img_d_CCM, spectrums_d_CCM, results_d}, 
                                                        analyzer_properties_CCM.n_spectrums,
                                                        analyzer_properties_CCM.envi_properties.lines,
                                                        analyzer_properties_CCM.envi_properties.samples,
                                                        analyzer_properties_CCM.envi_properties.bands,
                                                        analyzer_properties_CCM.coalescent_read_size).wait();
 
-    Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, analyzer_properties_CCM.envi_properties.get_image_2Dsize(), &copied_event);
+    Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, results_size, &copied_event);
     copied_event.value().wait();
 
-    exit_code return_value = results_h[0] == 0 && results_h[1] == 1 ? EXIT_SUCCESS : EXIT_FAILURE;
+    exit_code return_value = CCM_CORRECT(results_h);
     
     sycl::free(get<float*>(results_d), device_q);
     free(results_h);
@@ -576,7 +576,7 @@ exit_code test_create_results() {
     for(size_t i = 0; i < img_2Dsize; i++)
         nearest_materials_image[i] = (int)final_results_h[i];
 
-    exit_code code = create_results(TEST_RESULT_FILE, nearest_materials_image, analyzer_properties.envi_properties.samples, analyzer_properties.envi_properties.lines, names, analyzer_properties.n_spectrums);
+    exit_code code = create_results(TEST_RESULT_FILE, nearest_materials_image, analyzer_properties.envi_properties.samples, analyzer_properties.envi_properties.lines, names, analyzer_properties.n_spectrums, "");
     free(nearest_materials_image);
     return code;
 }

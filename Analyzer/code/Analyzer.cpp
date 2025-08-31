@@ -140,6 +140,7 @@ int main(int argc, char* argv[]) {
     if(img_scaled.has_value())
         img_scaled.value().wait();
     CHR_time_point start_copy_spectrums = chrono::high_resolution_clock::now();
+
     ////////////////////////////Read spectrums////////////////////////////////
     size_t n_spectrums;
     float* spectrums_h;
