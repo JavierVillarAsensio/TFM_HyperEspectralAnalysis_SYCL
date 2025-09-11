@@ -164,7 +164,7 @@ int main(int argc, char* argv[]) {
     ////////////////////////////Copy spectrums////////////////////////////////
     Event_opt opt_spectrums_copied;
     cout << "Copying spectrums to device..." << endl;
-    if(Analyzer_tools::copy_to_device(analyzer_properties.USE_ACCESSORS, device_q, spectrums_d, spectrums_h, n_spectrums * analyzer_properties.envi_properties.bands, &opt_spectrums_copied)) {
+    if(Analyzer_tools::copy_to_device(analyzer_properties.USE_ACCESSORS, device_q, spectrums_d, spectrums_h, analyzer_properties.get_spectrums_size(), &opt_spectrums_copied)) {
         cout << "ERROR: copying spectrums to device. Aborting..." << endl;
         return EXIT_FAILURE;
     }
@@ -173,6 +173,7 @@ int main(int argc, char* argv[]) {
     if(opt_spectrums_copied.has_value())
         opt_spectrums_copied.value().wait();
     CHR_time_point start_kernel = chrono::high_resolution_clock::now();
+    
     /////////////////////////////launch kernel////////////////////////////////
     analyzer_properties.device_local_memory = 1; // local memory causes crash, needs investigation
     Event_opt kernel_finished;

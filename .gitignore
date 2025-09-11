@@ -10,3 +10,5 @@ spectrums/4/
 spectrums/spectrums.csv
 /output
 /Analyzer/test/jasperRidge2_R198_*
+config
+*.properties

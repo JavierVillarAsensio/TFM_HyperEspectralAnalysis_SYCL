@@ -78,7 +78,7 @@ int write_img(ENVI_reader::ENVI_properties& bigger_p, float* new_img, string&img
 
     try {
         uint16_t value;
-        for(size_t i = 0; i < bigger_p.lines * bigger_p.samples * bigger_p.bands; i++) {
+        for(size_t i = 0; i < bigger_p.get_image_3Dsize(); i++) {
             value = static_cast<uint16_t>(round(new_img[i]));
             new_img_file.write(reinterpret_cast<const char*>(&value), sizeof(uint16_t));
         }
@@ -220,6 +220,7 @@ int main(int argc, char* argv[]) {
         create_new_properties(original_p, bigger_p, cps_x_coordinate);
     } catch (const exception& e) {
         cerr << "Error while creating the new properties: " << e.what() << endl;
+        free(img);
         return EXIT_FAILURE;
     }
     cout << "New properties created." << endl;
@@ -230,16 +231,16 @@ int main(int argc, char* argv[]) {
         create_new_image(original_p, img, bigger, cps_x_coordinate);
     } catch (const exception& e) {
         cerr << "Error while creating the new image: " << e.what() << endl;
+        free(img);
+        free(bigger);
         return EXIT_FAILURE;
     }
     cout << "New image created." << endl;
 
-    size_t line_size = bigger_p.samples * bigger_p.bands;
-    for(size_t i = 0; i < bigger_p.get_image_3Dsize(); i++) {
-        cout << bigger[i] << " ";
-        if((i % line_size) == (line_size - 1))
-            cout << endl;
-    }
+    int exit_code = write_files(bigger_p, bigger, original_folder_path, new_folder_path, cps_x_coordinate);
 
-    return write_files(bigger_p, bigger, original_folder_path, new_folder_path, cps_x_coordinate);
+    free(img);
+    free(bigger);
+
+    return exit_code;
 }

@@ -6,6 +6,8 @@
 using namespace std;
 using namespace Analyzer_tools;
 
+size_t Analyzer_properties::get_spectrums_size() const noexcept {return n_spectrums * envi_properties.bands; }
+
 const unordered_map<string, Analyzer_algorithms> algorithms_mapper {
     {"EUCLIDEAN", EUCLIDEAN},
     {"CCM", CCM}
@@ -131,26 +133,20 @@ namespace Analyzer_tools {
         try {
             switch (properties.device) {
                 case Analyzer_tools::CPU:
-                    q = sycl::queue([](const sycl::device& dev) {
-                        return dev.is_cpu();
-                    });
+                    q = sycl::queue(sycl::cpu_selector_v);
                     break;
 
                 case Analyzer_tools::GPU:
-                    q = sycl::queue([](const sycl::device& dev) {
-                        return dev.is_gpu();
-                    });
+                    q = sycl::queue(sycl::gpu_selector_v);
                     break;
 
                 case Analyzer_tools::ACCELERATOR:
-                    q = sycl::queue([](const sycl::device& dev) {
-                        return dev.is_accelerator();
-                    });
+                    q = sycl::queue(sycl::accelerator_selector_v);
                     break;
 
                 case Analyzer_tools::DEFAULT:
                 default:
-                    q = sycl::queue();
+                    q = sycl::queue(sycl::default_selector_v);
                     break;
             }
         } catch (const sycl::exception& e) {
@@ -163,6 +159,28 @@ namespace Analyzer_tools {
             }
         }
 
+         const auto& platforms = sycl::platform::get_platforms();
+        sycl::device best_device;
+        int best_score = -1;
+
+        std::cout << "=== Dispositivos disponibles ===\n";
+
+        for (const auto& platform : platforms) {
+            for (const auto& dev : platform.get_devices()) {
+
+                std::string type =
+                    dev.is_gpu() ? "GPU" :
+                    dev.is_cpu() ? "CPU" :
+                    dev.is_accelerator() ? "Accelerator" : "Otro";
+
+                std::cout << "Nombre: " << dev.get_info<sycl::info::device::name>() << "\n";
+                std::cout << "  Tipo: " << type << "\n";
+               
+            }
+    }
+
+
+        cout << "Executing SYCL kernels on: " << q.get_device().get_info<sycl::info::device::name>() << endl;
         properties.ND_max_item_work_group_size = q.get_device().get_info<sycl::info::device::max_work_group_size>();
         if(properties.ND_max_item_work_group_size > 1)
             properties.ND_kernel = true;
@@ -175,7 +193,7 @@ namespace Analyzer_tools {
         return EXIT_SUCCESS;
     }
 
-    exit_code copy_to_device(bool use_accessors, sycl::queue& device_q, variant<float*, sycl::buffer<float, 1>>& ptr_d, float* ptr_h, size_t copy_size, optional<sycl::event>* copied) {
+    exit_code copy_to_device(bool use_accessors, sycl::queue& device_q, Analyzer_variant& ptr_d, float* ptr_h, size_t copy_size, optional<sycl::event>* copied) {
 
         try {
             if(use_accessors) {
@@ -228,98 +246,98 @@ namespace Analyzer_tools {
     }
 
     exit_code initialize(Analyzer_tools::Analyzer_properties& analyzer_properties, sycl::queue& device_q, int argc, char** argv) {
-    cout << "Reading program execution options..." << endl;
+        cout << "Reading program execution options..." << endl;
 
-    analyzer_properties = Analyzer_tools::initialize_analyzer(argc, argv);
-    if(analyzer_properties.image_hdr_folder_path == nullptr || analyzer_properties.specrums_folder_path == nullptr) {
-        cerr << "ERROR: Error initializing analyzer. Aborting..." << endl;
-        return EXIT_FAILURE;
+        analyzer_properties = Analyzer_tools::initialize_analyzer(argc, argv);
+        if(analyzer_properties.image_hdr_folder_path == nullptr || analyzer_properties.specrums_folder_path == nullptr) {
+            cerr << "ERROR: Error initializing analyzer. Aborting..." << endl;
+            return EXIT_FAILURE;
+        }
+
+        if(Analyzer_tools::initialize_SYCL_queue(analyzer_properties, device_q)) {
+            cerr << "ERROR: Error initializing SYCL. Aborting..." << endl;
+            return EXIT_FAILURE;
+        }
+
+        cout << "Program execution options read with no errors." << endl;
+        return EXIT_SUCCESS;
     }
-
-    if(Analyzer_tools::initialize_SYCL_queue(analyzer_properties, device_q)) {
-        cerr << "ERROR: Error initializing SYCL. Aborting..." << endl;
-        return EXIT_FAILURE;
-    }
-
-    cout << "Program execution options read with no errors." << endl;
-    return EXIT_SUCCESS;
-}
 
     exit_code read_hdr(Analyzer_tools::Analyzer_properties& analyzer_properties) {
-    cout << "Reading .hdr ENVI header file..." << endl;
-    string hdr_path = Analyzer_tools::get_filename_by_extension(analyzer_properties.image_hdr_folder_path, HDR_FILE_EXTENSION);
-    if (hdr_path.empty()){
-        cerr << "ERROR: Could not find an .hdr file in the path: " << analyzer_properties.image_hdr_folder_path << ". Aborting..." << endl;
-        return EXIT_FAILURE;
+        cout << "Reading .hdr ENVI header file..." << endl;
+        string hdr_path = Analyzer_tools::get_filename_by_extension(analyzer_properties.image_hdr_folder_path, HDR_FILE_EXTENSION);
+        if (hdr_path.empty()){
+            cerr << "ERROR: Could not find an .hdr file in the path: " << analyzer_properties.image_hdr_folder_path << ". Aborting..." << endl;
+            return EXIT_FAILURE;
+        }
+        
+        if (ENVI_reader::read_hdr(hdr_path, analyzer_properties.envi_properties)){
+            cerr << "ERROR: Error reading .hdr file. Aborting..." << endl;
+            return EXIT_FAILURE;
+        }
+        cout << ".hdr ENVI header file read with no errors." << endl;
+        return EXIT_SUCCESS;
     }
-    
-    if (ENVI_reader::read_hdr(hdr_path, analyzer_properties.envi_properties)){
-        cerr << "ERROR: Error reading .hdr file. Aborting..." << endl;
-        return EXIT_FAILURE;
-    }
-    cout << ".hdr ENVI header file read with no errors." << endl;
-    return EXIT_SUCCESS;
-}
 
     exit_code read_hyperspectral(Analyzer_tools::Analyzer_properties& analyzer_properties, float*& img) {
-    cout << "Reading hyperespectral image..." << endl;
-    img = (float*)malloc(analyzer_properties.envi_properties.get_image_3Dsize() * sizeof(float));
+        cout << "Reading hyperespectral image..." << endl;
+        img = (float*)malloc(analyzer_properties.envi_properties.get_image_3Dsize() * sizeof(float));
 
-    switch (analyzer_properties.envi_properties.interleave) {
-        case ENVI_reader::Interleave::BIL: {
-            string img_path = Analyzer_tools::get_filename_by_extension(analyzer_properties.image_hdr_folder_path, IMG_FILE_EXTENSION);
-            if (img_path.empty()){
-                cerr << "ERROR: Could not find an .img file in the path: " << analyzer_properties.image_hdr_folder_path << ". Aborting..." << endl;
-                return EXIT_FAILURE;
+        switch (analyzer_properties.envi_properties.interleave) {
+            case ENVI_reader::Interleave::BIL: {
+                string img_path = Analyzer_tools::get_filename_by_extension(analyzer_properties.image_hdr_folder_path, IMG_FILE_EXTENSION);
+                if (img_path.empty()){
+                    cerr << "ERROR: Could not find an .img file in the path: " << analyzer_properties.image_hdr_folder_path << ". Aborting..." << endl;
+                    return EXIT_FAILURE;
+                }
+                if(ENVI_reader::read_img_bil(img, analyzer_properties.envi_properties, img_path)) {
+                    cerr << "ERROR reading hyperespectral image. Aborting..." << endl;
+                    free(img);
+                    return EXIT_FAILURE;
+                }
+                break;
             }
-            if(ENVI_reader::read_img_bil(img, analyzer_properties.envi_properties, img_path)) {
-                cerr << "ERROR reading hyperespectral image. Aborting..." << endl;
+            default:
+                cerr << "ERROR: The interleave indicated in the .hdr file is not supported. Aborting..." << endl;
                 free(img);
                 return EXIT_FAILURE;
-            }
-            break;
         }
-        default:
-            cerr << "ERROR: The interleave indicated in the .hdr file is not supported. Aborting..." << endl;
-            free(img);
-            return EXIT_FAILURE;
+        cout << "Hyperespectral image read with no errors." << endl;
+        return EXIT_SUCCESS;
     }
-    cout << "Hyperespectral image read with no errors." << endl;
-    return EXIT_SUCCESS;
-}
 
     exit_code read_spectrums(Analyzer_tools::Analyzer_properties& analyzer_properties, size_t& n_spectrums, float*& spectrums, string*& names) { 
-    cout << "Reading sprectrums files..." << endl;
-    n_spectrums = Analyzer_tools::count_spectrums(analyzer_properties.specrums_folder_path);
-    if(!n_spectrums) {
-        cerr << "ERROR: Error counting spectrums" << endl;
-        return EXIT_FAILURE;
-    }
-    spectrums = (float*)malloc(analyzer_properties.envi_properties.bands * n_spectrums * sizeof(float));
-    names = new string[n_spectrums];
-    int spectrum_index = 0;
+        cout << "Reading sprectrums files..." << endl;
+        n_spectrums = Analyzer_tools::count_spectrums(analyzer_properties.specrums_folder_path);
+        if(!n_spectrums) {
+            cerr << "ERROR: Error counting spectrums" << endl;
+            return EXIT_FAILURE;
+        }
+        spectrums = (float*)malloc(analyzer_properties.envi_properties.bands * n_spectrums * sizeof(float));
+        names = new string[n_spectrums];
+        int spectrum_index = 0;
 
-    if(Analyzer_tools::read_spectrums(analyzer_properties.specrums_folder_path, spectrums, names, analyzer_properties.envi_properties, &spectrum_index)) {
-        cerr << "ERROR: reading spectrums. Aborting..." << endl;
-        free(spectrums);
-        delete[] names;
-        return EXIT_FAILURE;
+        if(Analyzer_tools::read_spectrums(analyzer_properties.specrums_folder_path, spectrums, names, analyzer_properties.envi_properties, &spectrum_index)) {
+            cerr << "ERROR: reading spectrums. Aborting..." << endl;
+            free(spectrums);
+            delete[] names;
+            return EXIT_FAILURE;
+        }
+        cout << "Spectrums files read with no errors." << endl;
+        return EXIT_SUCCESS;
     }
-    cout << "Spectrums files read with no errors." << endl;
-    return EXIT_SUCCESS;
-}
 
     exit_code scale_image(sycl::queue& device_q, Analyzer_tools::Analyzer_properties& analyzer_properties, Analyzer_variant& img_d, Event_opt& img_scaled) {
-    cout << "Scaling image by reflectance scale factor..." << endl;
-    try {
-        img_scaled = Analyzer_tools::launch_kernel<Functors::ImgScaler>(device_q, img_scaled, analyzer_properties, array{img_d}, analyzer_properties.envi_properties.reflectance_scale_factor);
-    } catch (const sycl::exception &e) {
-        std::cerr << "Error when launching SYCL kernel to scale image, error message: " << e.what() << std::endl;
-        return EXIT_FAILURE;
+        cout << "Scaling image by reflectance scale factor..." << endl;
+        try {
+            img_scaled = Analyzer_tools::launch_kernel<Functors::ImgScaler>(device_q, img_scaled, analyzer_properties, array{img_d}, analyzer_properties.envi_properties.reflectance_scale_factor);
+        } catch (const sycl::exception &e) {
+            std::cerr << "Error when launching SYCL kernel to scale image, error message: " << e.what() << std::endl;
+            return EXIT_FAILURE;
+        }
+        cout << "Image scaled with no errors." << endl;
+        return EXIT_SUCCESS;
     }
-    cout << "Image scaled with no errors." << endl;
-    return EXIT_SUCCESS;
-}
 
     exit_code launch_analysis(Analyzer_tools::Analyzer_properties& analyzer_properties, sycl::queue& device_q, Analyzer_variant& img_d, Analyzer_variant& spectrums_d, Analyzer_variant& results_d, Event_opt& kernel_finished) {
         switch (analyzer_properties.algorithm){

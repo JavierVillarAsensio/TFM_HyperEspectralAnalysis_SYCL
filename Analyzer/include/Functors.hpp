@@ -56,7 +56,6 @@ namespace Functors {
 
         inline static constexpr size_t get_n_access_points() { return 1; }
         inline static const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return lines * cols * bands;}
-        inline static const size_t get_results_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool nd) { return lines * cols; }
         inline static constexpr bool has_ND() { return false; }
 
         void operator()(sycl::id<1> i) const { img_d[i] /= scale_factor; } 
@@ -163,7 +162,7 @@ namespace Functors {
                 id.barrier();   //the lowest value is already in the results
                 
                 read_distance = this->results_d[group_id];
-                if(std::fabs(sum - read_distance) < 0.0001)
+                if(std::fabs(sum - read_distance) < 0.0001f)
                     lowest_distance.store(local_id);    //store the index of the nearest spectrum
 
             } 
@@ -389,7 +388,7 @@ namespace Functors {
             id.barrier();   //the lowest value is already in the results
             
             read_coefficient = this->results_d[group_id];
-            if(std::fabs(correlation - read_coefficient) < 0.0000001)   //tolerance for float comparison
+            if(std::fabs(correlation - read_coefficient) < 0.00001f)   //tolerance for float comparison
                 highest_coefficient.store(local_id);    //store the index of the nearest spectrum*/
         }
     };
