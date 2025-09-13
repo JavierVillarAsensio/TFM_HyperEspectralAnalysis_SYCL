@@ -158,19 +158,19 @@ namespace Functors {
             size_t wi_id = id.get(0);
             
             size_t img_2D_size = this->n_lines * this->n_cols;
-
-            //pixel to be compared
-            size_t pixel_offset = wi_id % img_2D_size;
             
             //spectrum to be compared
-            size_t spectrum_offset = (wi_id / img_2D_size) * this->bands_size;
+            size_t spectrum_offset = (wi_id % this->n_spectrums) * this->bands_size;
 
-            //bil img offset            line                        line size                      line offset
-            size_t img_offset = (((wi_id / this->n_cols) * (this->n_cols * this->bands_size)) + (wi_id % this->n_cols)) % (img_2D_size * this->bands_size);
+            //bil img offset
+            size_t img_offset = (wi_id / this->n_spectrums) * this->bands_size;
+
+            //pixel to be compared
+            size_t pixel_offset = img_offset / this->n_spectrums;
             
             float sum = 0.f, diff;
             for(int i = 0; i < this->bands_size; i++) {
-                diff = this->img_d[img_offset + (i * this->n_cols)] - this->spectrums_d[spectrum_offset + i];
+                diff = this->img_d[img_offset + i] - this->spectrums_d[spectrum_offset + i];
                 sum += diff * diff;
             }
             
@@ -192,19 +192,17 @@ namespace Functors {
                 size_t group_id = id.get_group_linear_id();
                 size_t local_id = id.get_local_linear_id();
 
-                //bil img offset              line                          line size                     group sample
-                size_t img_offset = ((group_id / this->n_cols) * (this->n_cols * this->bands_size)) + (group_id % this->n_cols);
+                //bil img offset
+                size_t img_offset = group_id * this->bands_size;
 
                 size_t spectrum_offset = local_id * this->bands_size;
 
                 float sum = 0.f, diff;
                 for(int i = 0; i < this->bands_size; i++) {
-                    diff = this->img_d[img_offset + (i * this->n_cols)] - this->spectrums_d[spectrum_offset + i];
+                    diff = this->img_d[img_offset + i] - this->spectrums_d[spectrum_offset + i];
                     sum += diff * diff;
                 }
 
-                
-                
                 //                                                                                                                                       where the lowest value is stored
                 sycl::atomic_ref<float, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> lowest_distance(this->results_d[group_id]);
                 float read_distance = lowest_distance.load();
