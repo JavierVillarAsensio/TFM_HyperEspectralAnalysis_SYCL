@@ -48,11 +48,11 @@ namespace Functors {
     };
 
     template<typename Data_access>
-    struct Results_initilizer : BaseFunctor<Data_access> {
+    struct ResultsInitilizer : BaseFunctor<Data_access> {
         Data_access results_d;
         float initial_value;
 
-        Results_initilizer(Data_access results_in, float initial_value_in, Local_mem_wrapper local_mem_wrapped_in) : results_d(results_in), initial_value(initial_value_in) {}
+        ResultsInitilizer(Data_access results_in, float initial_value_in, Local_mem_wrapper local_mem_wrapped_in) : results_d(results_in), initial_value(initial_value_in) {}
 
         static inline constexpr size_t get_n_access_points() { return 1; }
         static inline const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return lines * cols; }
@@ -66,7 +66,7 @@ namespace Functors {
         Data_access img_d;
         int scale_factor;
 
-        ImgScaler(Data_access img_in, int reflectance_scale_factor, Local_mem_wrapper local_mem_wrapped_in) : scale_factor(reflectance_scale_factor/100), img_d(img_in) {}
+        ImgScaler(Data_access img_in, int reflectance_scale_factor, Local_mem_wrapper local_mem_wrapped_in) : scale_factor(reflectance_scale_factor), img_d(img_in) {}
 
         inline static constexpr size_t get_n_access_points() { return 1; }
         inline static const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return lines * cols * bands;}
@@ -82,14 +82,16 @@ namespace Functors {
         size_t n_cols, bands_size;
         int interleave; //BSQ == 0, BIL == 1, BIP == 2
         size_t line_size;
+        float scale_factor;
 
-        ImgSerializer(Data_access img_read_in, Data_access img_reordered_in, size_t n_spectrums_in, size_t n_lines_in, size_t n_cols_in, size_t bands_size_in, int interleave_in) 
+        ImgSerializer(Data_access img_read_in, Data_access img_reordered_in, size_t n_cols_in, size_t bands_size_in, int interleave_in, float scale_factor_in, Local_mem_wrapper local_mem_wrapped_in) 
         : img_read(img_read_in), 
           img_reordered(img_reordered_in),
           n_cols(n_cols_in),
           bands_size(bands_size_in),
           interleave(interleave_in),
-          line_size(n_cols_in * bands_size_in) {}
+          line_size(n_cols_in * bands_size_in),
+          scale_factor(scale_factor_in) {}
         
         inline static constexpr size_t get_n_access_points() { return 2; }
         inline static const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return lines * cols * bands; }
@@ -98,15 +100,16 @@ namespace Functors {
         void operator()(sycl::id<1> id) const {
             size_t new_index;
             if(interleave == 1) {   //BIL
+                size_t line = id / line_size;
                 size_t sample = id % n_cols;
                 size_t band = (id / n_cols) % bands_size;
 
-                new_index = (sample * bands_size) + band;
+                new_index = (line * line_size) + (sample * bands_size) + band;
             }
             else    //not implemented
                 new_index = id;
         
-            img_reordered[new_index] = img_read[id];
+            img_reordered[new_index] = img_read[id]/scale_factor;
         } 
     };
 

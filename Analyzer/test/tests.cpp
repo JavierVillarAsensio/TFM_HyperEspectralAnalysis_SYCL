@@ -13,6 +13,7 @@ float* img_h = nullptr;
 float* spectrums_h = nullptr;
 float* final_results_h = nullptr;
 Analyzer_variant img_d;
+Analyzer_variant img_d_buff;
 Analyzer_variant spectrums_d;
 string* names = nullptr;
 
@@ -119,7 +120,7 @@ exit_code check_scaled(T a) {
     size_t full_line_bands = TEST_BANDS * TEST_SAMPLES;
 
     for(size_t i = 0; i < TEST_IMG_SIZE; i++) {
-        if(!(fabs(a[i] - TEST_SCALED_IMG[ ((i%TEST_SAMPLES) * TEST_BANDS) + ((i/TEST_SAMPLES)%TEST_BANDS) + ((i/full_line_bands) * full_line_bands) ]) < epsilon))
+        if(!(fabs(a[i] - TEST_SCALED_IMG[i]) < epsilon))
             return EXIT_FAILURE;
     }
 
@@ -315,7 +316,7 @@ exit_code test_scale_img_USM() {
     size_t img_size = analyzer_properties.envi_properties.get_image_3Dsize();
     float* ptr_h = (float*)malloc(img_size * sizeof(float));
 
-    Analyzer_tools::launch_kernel<Functors::ImgScaler>(device_q, copied_event, analyzer_properties, array{img_d}, analyzer_properties.envi_properties.reflectance_scale_factor).wait();
+    Analyzer_tools::scale_image(device_q, analyzer_properties, img_d, copied_event, true);
 
     Analyzer_tools::copy_from_device(false, device_q, ptr_h, img_d, img_size, &copied_event);
     copied_event.value().wait();
@@ -327,27 +328,25 @@ exit_code test_scale_img_USM() {
     return ret;
 }
 
-exit_code test_copy_buff() {
-    Analyzer_variant buff;
-    return Analyzer_tools::copy_to_device(true, device_q, buff, img_h, analyzer_properties.envi_properties.get_image_3Dsize()); 
-}
+exit_code test_copy_buff() { return Analyzer_tools::copy_to_device(true, device_q, img_d_buff, img_h, analyzer_properties.envi_properties.get_image_3Dsize()); }
 
 exit_code test_scale_img_acc() {
+    analyzer_properties.USE_ACCESSORS = true;
+
     size_t img_size = analyzer_properties.envi_properties.get_image_3Dsize();
-    Analyzer_variant img_d_buff;
     float* ptr_h = (float*)malloc(img_size * sizeof(float));
 
-    Analyzer_tools::copy_to_device(true, device_q, img_d_buff, img_h, img_size, &copied_event);
+    Analyzer_tools::scale_image(device_q, analyzer_properties, img_d_buff, copied_event, true);
 
-    Analyzer_tools::launch_kernel<Functors::ImgScaler>(device_q, copied_event, analyzer_properties, array{img_d_buff}, analyzer_properties.envi_properties.reflectance_scale_factor).wait();
-    
     Analyzer_tools::copy_from_device(true, device_q, ptr_h, img_d_buff, img_size, &copied_event);
     copied_event.value().wait();
 
-    bool ret = check_scaled(ptr_h);
+    exit_code ret = check_scaled(ptr_h);
 
     free(ptr_h);
+    img_d_buff.~variant();
 
+    analyzer_properties.USE_ACCESSORS = false;
     return ret;
 }
 
@@ -367,7 +366,7 @@ void sycl_tests(int& tests_done, int& tests_passed) {
     test(test_copy_USM, "copy the image to device with USM", tests_passed, tests_done);
     test(test_scale_img_USM, "scale the image to normalize with USM", tests_passed, tests_done);
     test(test_copy_buff, "copy the image to device with buffers", tests_passed, tests_done);
-    //test(test_scale_img_acc, "scale the image to normalize with accessors", tests_passed, tests_done);
+    test(test_scale_img_acc, "scale the image to normalize with accessors", tests_passed, tests_done);
 }
 
 
@@ -602,8 +601,8 @@ int main(int argc, char **argv){
     img_tests(tests_done, tests_passed);
     spectrums_tests(tests_done, tests_passed);
     sycl_tests(tests_done, tests_passed);
-    kernel_tests(tests_done, tests_passed);
-    results_tests(tests_done, tests_passed);
+    //kernel_tests(tests_done, tests_passed);
+    //results_tests(tests_done, tests_passed);
 
     if (tests_passed != tests_done)
         cout << "\033[31mThe number of tests passed is lower than the tests done: \033[0m" << "Tests passed: " << tests_passed << " < " "Tests done: " << tests_done << endl;

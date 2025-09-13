@@ -6,6 +6,8 @@
 using namespace std;
 using namespace Analyzer_tools;
 
+#define PERCENTAGE_FACTOR 100
+
 size_t Analyzer_properties::get_spectrums_size() const noexcept {return n_spectrums * envi_properties.bands; }
 
 const unordered_map<string, Analyzer_algorithms> algorithms_mapper {
@@ -54,7 +56,7 @@ void common_analysis(Analyzer_tools::Analyzer_properties& analyzer_properties, s
     Analyzer_tools::copy_to_device(analyzer_properties.USE_ACCESSORS, device_q, results_d, final_results_h, results_size, &copied_event);
 
     Event_opt results_initialized;
-    results_initialized = Analyzer_tools::launch_kernel<Functors::Results_initilizer>(device_q, copied_event, analyzer_properties, array{results_d}, Static_f::results_initial_value());
+    results_initialized = Analyzer_tools::launch_kernel<Functors::ResultsInitilizer>(device_q, copied_event, analyzer_properties, array{results_d}, Static_f::results_initial_value());
 
     kernel_finished = Analyzer_tools::launch_kernel<Functor>(device_q, results_initialized, analyzer_properties, array{img_d, spectrums_d, results_d}, 
                                                                          analyzer_properties.n_spectrums,
@@ -352,10 +354,29 @@ namespace Analyzer_tools {
         return EXIT_SUCCESS;
     }
 
-    exit_code scale_image(sycl::queue& device_q, Analyzer_tools::Analyzer_properties& analyzer_properties, Analyzer_variant& img_d, Event_opt& img_scaled) {
+    exit_code scale_image(sycl::queue& device_q, Analyzer_tools::Analyzer_properties& analyzer_properties, Analyzer_variant& img_d, Event_opt& img_scaled, bool serialize) {
         cout << "Scaling image by reflectance scale factor..." << endl;
         try {
-            img_scaled = Analyzer_tools::launch_kernel<Functors::ImgScaler>(device_q, img_scaled, analyzer_properties, array{img_d}, analyzer_properties.envi_properties.reflectance_scale_factor);
+            if(serialize) {
+                size_t img_size = analyzer_properties.envi_properties.get_image_3Dsize();
+                float* img_reordered_ptr = (float*)malloc(img_size * sizeof(float));
+                Analyzer_variant img_reordered;
+
+                if(analyzer_properties.USE_ACCESSORS)
+                    img_reordered = sycl::buffer<float, 1>(img_reordered_ptr, img_reordered_ptr + img_size);
+                else
+                    img_reordered = sycl::malloc_device<float>(img_size, device_q);
+
+                img_scaled = Analyzer_tools::launch_kernel<Functors::ImgSerializer>(device_q, img_scaled, analyzer_properties, array{img_d, img_reordered},
+                                                                                    analyzer_properties.envi_properties.samples,
+                                                                                    analyzer_properties.envi_properties.bands,
+                                                                                    analyzer_properties.envi_properties.interleave,
+                                                                                    analyzer_properties.envi_properties.reflectance_scale_factor/PERCENTAGE_FACTOR);
+
+                img_d = img_reordered;
+            }
+            else
+                img_scaled = Analyzer_tools::launch_kernel<Functors::ImgScaler>(device_q, img_scaled, analyzer_properties, array{img_d}, analyzer_properties.envi_properties.reflectance_scale_factor/PERCENTAGE_FACTOR);
         } catch (const sycl::exception &e) {
             std::cerr << "Error when launching SYCL kernel to scale image, error message: " << e.what() << std::endl;
             return EXIT_FAILURE;

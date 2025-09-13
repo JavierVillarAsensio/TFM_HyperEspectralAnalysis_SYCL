@@ -135,7 +135,7 @@ int main(int argc, char* argv[]) {
     Event_opt img_scaled;
     if(opt_img_copied.has_value())
         img_scaled = opt_img_copied.value();
-    Analyzer_tools::scale_image(device_q, analyzer_properties, img_d, img_scaled);
+    Analyzer_tools::scale_image(device_q, analyzer_properties, img_d, img_scaled, true);
 
     if(img_scaled.has_value())
         img_scaled.value().wait();

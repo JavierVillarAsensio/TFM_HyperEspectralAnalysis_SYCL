@@ -152,7 +152,7 @@ namespace Analyzer_tools {
     exit_code read_hdr(Analyzer_tools::Analyzer_properties& analyzer_properties);
     exit_code read_hyperspectral(Analyzer_tools::Analyzer_properties& analyzer_properties, float*& img);
     exit_code read_spectrums(Analyzer_tools::Analyzer_properties& analyzer_properties, size_t& n_spectrums, float*& spectrums, std::string*& names);
-    exit_code scale_image(sycl::queue& device_q, Analyzer_tools::Analyzer_properties& analyzer_properties, Analyzer_variant& img_d, Event_opt& img_scaled);
+    exit_code scale_image(sycl::queue& device_q, Analyzer_tools::Analyzer_properties& analyzer_properties, Analyzer_variant& img_d, Event_opt& img_scaled, bool serialize);
     exit_code launch_analysis(Analyzer_tools::Analyzer_properties& analyzer_properties, sycl::queue& device_q, Analyzer_variant& img_d, Analyzer_variant& spectrums_d, Analyzer_variant& results_d, Event_opt& kernel_finished);
 
     template<template <typename> typename Functor, typename... Args>
