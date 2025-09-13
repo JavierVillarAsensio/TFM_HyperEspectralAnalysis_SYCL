@@ -240,14 +240,14 @@ void hdr_tests(int& tests_done, int& tests_passed){
 ///////////////////////////////IMG TESTS///////////////////////////////
 exit_code test_read_img_bil() {
     img_h = (float*)malloc(analyzer_properties.envi_properties.get_image_3Dsize() * sizeof(float));
-    return ENVI_reader::read_img_bil(img_h, analyzer_properties.envi_properties, TEST_IMG_FILE_PATH);
+    return ENVI_reader::read_img(img_h, analyzer_properties.envi_properties, TEST_IMG_FILE_PATH);
 }
 
-exit_code test_read_nonexistent_img() { return ENVI_reader::read_img_bil(nullptr, analyzer_properties.envi_properties, "a") ? EXIT_SUCCESS : EXIT_FAILURE; }
+exit_code test_read_nonexistent_img() { return ENVI_reader::read_img(nullptr, analyzer_properties.envi_properties, "a") ? EXIT_SUCCESS : EXIT_FAILURE; }
 
 exit_code test_read_img_with_wrong_length() {
     analyzer_properties.envi_properties.bands++;
-    exit_code code = ENVI_reader::read_img_bil(nullptr, analyzer_properties.envi_properties, TEST_IMG_FILE_PATH);
+    exit_code code = ENVI_reader::read_img(nullptr, analyzer_properties.envi_properties, TEST_IMG_FILE_PATH);
     analyzer_properties.envi_properties.bands--;
     return code ? EXIT_SUCCESS : EXIT_FAILURE;
 }
@@ -354,10 +354,10 @@ exit_code test_scale_img_acc() {
 exit_code test_initializa_SYCL_queue() { return Analyzer_tools::initialize_SYCL_queue(analyzer_properties, device_q); }
 
 exit_code test_initialize_default_SYCL_queue() {
-    analyzer_properties.device = Analyzer_tools::ACCELERATOR;
+    analyzer_properties.device = Analyzer_tools::DEFAULT;
     sycl::queue test_q;
     exit_code code = Analyzer_tools::initialize_SYCL_queue(analyzer_properties, test_q);
-    analyzer_properties.device = Analyzer_tools::DEFAULT;
+    analyzer_properties.device = Analyzer_tools::GPU;
     return code;
 }
 

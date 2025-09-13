@@ -31,7 +31,7 @@ namespace ENVI_reader {
     };
 
     exit_code read_hdr(const std::string filename, ENVI_reader::ENVI_properties& properties);
-    exit_code read_img_bil(float *img, const ENVI_reader::ENVI_properties& properties, const std::string filename);
+    exit_code read_img(float *img, const ENVI_reader::ENVI_properties& properties, const std::string filename);
     exit_code check_properties(const ENVI_reader::ENVI_properties& properties);
     exit_code read_spectrum(const std::string filename, float* reflectances, std::string &name, ENVI_reader::ENVI_properties& properties);
 };

@@ -69,7 +69,7 @@ namespace Analyzer_tools {
         struct KernelName{};
 
         template<template <typename> typename Functor, typename Data_access_type, bool use_local_memory, typename... Args>
-        inline Functor<Data_access_type> construct_functor(std::array<Data_access_type, Functor<Data_access_type>::get_n_access_points()>& arr, Analyzer_properties& p, sycl::handler& h, Args... args){
+        Functor<Data_access_type> construct_functor(std::array<Data_access_type, Functor<Data_access_type>::get_n_access_points()>& arr, Analyzer_properties& p, sycl::handler& h, Args... args){
             Local_mem_wrapper local_mem_wrapped;
             if constexpr (use_local_memory) {
                 auto local_mem = sycl::local_accessor<float, 1>(Functor<Data_access_type>::get_local_mem_size(p.envi_properties.lines, p.envi_properties.samples, p.envi_properties.bands, p.n_spectrums), h);
@@ -82,7 +82,7 @@ namespace Analyzer_tools {
         }
 
         template <template <typename> typename Functor, bool use_local_memory, size_t array_size, typename Data_access_type, typename... Args>
-        inline auto make_functor(Data_access_type /*detect type*/, std::array<Data_access_type, array_size>& accesses, Analyzer_properties& p, sycl::handler& h, Args&&... args) {
+        auto make_functor(Data_access_type /*detect type*/, std::array<Data_access_type, array_size>& accesses, Analyzer_properties& p, sycl::handler& h, Args&&... args) {
             using Array_type = std::conditional_t<std::is_same_v<Data_access_type, sycl::buffer<float,1>>, std::array<Acc, array_size>, std::array<float*, array_size>>;
             using Array_data_type = std::conditional_t<std::is_same_v<Data_access_type, sycl::buffer<float, 1>>, Acc, float*>;
 
@@ -106,7 +106,7 @@ namespace Analyzer_tools {
         }
 
         template<template <typename> typename Functor, typename Data_access_type, typename Range_type, bool use_local_memory, size_t array_size, typename... Args>
-        inline sycl::event __launch_kernel(sycl::queue& device_q, Event_opt& opt_dependency, Analyzer_properties& p, Range_type range, std::array<Data_access_type, array_size>&& accesses, Args... args) {  
+        sycl::event __launch_kernel(sycl::queue& device_q, Event_opt& opt_dependency, Analyzer_properties& p, Range_type range, std::array<Data_access_type, array_size>&& accesses, Args... args) {  
             using Static_f = Functor<float*>;
             try {
                 return device_q.submit([&](sycl::handler& h) {
@@ -156,7 +156,7 @@ namespace Analyzer_tools {
     exit_code launch_analysis(Analyzer_tools::Analyzer_properties& analyzer_properties, sycl::queue& device_q, Analyzer_variant& img_d, Analyzer_variant& spectrums_d, Analyzer_variant& results_d, Event_opt& kernel_finished);
 
     template<template <typename> typename Functor, typename... Args>
-    inline sycl::event launch_kernel(sycl::queue& device_q, Event_opt& opt_dependency, Analyzer_properties& p, std::array<Analyzer_variant, Functor<float*>::get_n_access_points()>&& variants, Args... args) {
+    sycl::event launch_kernel(sycl::queue& device_q, Event_opt& opt_dependency, Analyzer_properties& p, std::array<Analyzer_variant, Functor<float*>::get_n_access_points()>&& variants, Args... args) {
         using Static_f = Functor<float*>;
         sycl::event return_event;
         Range_variant var_range = detail::create_range_variant<Functor>(p);

@@ -48,6 +48,20 @@ namespace Functors {
     };
 
     template<typename Data_access>
+    struct Results_initilizer : BaseFunctor<Data_access> {
+        Data_access results_d;
+        float initial_value;
+
+        Results_initilizer(Data_access results_in, float initial_value_in, Local_mem_wrapper local_mem_wrapped_in) : results_d(results_in), initial_value(initial_value_in) {}
+
+        static inline constexpr size_t get_n_access_points() { return 1; }
+        static inline const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return lines * cols; }
+        static inline constexpr bool has_ND() { return false; }
+
+        void operator()(sycl::id<1> i) const { results_d[i] = initial_value; }
+    };
+
+    template<typename Data_access>
     struct ImgScaler : BaseFunctor<Data_access>{
         Data_access img_d;
         int scale_factor;
@@ -59,7 +73,42 @@ namespace Functors {
         inline static constexpr bool has_ND() { return false; }
 
         void operator()(sycl::id<1> i) const { img_d[i] /= scale_factor; } 
-    };    
+    };  
+    
+    template<typename Data_access>
+    struct ImgSerializer : BaseFunctor<Data_access> {
+        Data_access img_read;
+        Data_access img_reordered;
+        size_t n_cols, bands_size;
+        int interleave; //BSQ == 0, BIL == 1, BIP == 2
+        size_t line_size;
+
+        ImgSerializer(Data_access img_read_in, Data_access img_reordered_in, size_t n_spectrums_in, size_t n_lines_in, size_t n_cols_in, size_t bands_size_in, int interleave_in) 
+        : img_read(img_read_in), 
+          img_reordered(img_reordered_in),
+          n_cols(n_cols_in),
+          bands_size(bands_size_in),
+          interleave(interleave_in),
+          line_size(n_cols_in * bands_size_in) {}
+        
+        inline static constexpr size_t get_n_access_points() { return 2; }
+        inline static const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return lines * cols * bands; }
+        inline static constexpr bool has_ND() { return false; }
+
+        void operator()(sycl::id<1> id) const {
+            size_t new_index;
+            if(interleave == 1) {   //BIL
+                size_t sample = id % n_cols;
+                size_t band = (id / n_cols) % bands_size;
+
+                new_index = (sample * bands_size) + band;
+            }
+            else    //not implemented
+                new_index = id;
+        
+            img_reordered[new_index] = img_read[id];
+        } 
+    };
 
     template<typename Data_access>
     struct Euclidean : BaseFunctor<Data_access>{  //there is no need to calculate the sqrt because we can compare the distances without it, saving computation :)

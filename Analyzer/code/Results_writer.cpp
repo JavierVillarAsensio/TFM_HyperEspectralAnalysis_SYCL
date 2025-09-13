@@ -94,7 +94,7 @@ int write_legend(int *nearest_materials_image, size_t n_pixels, string *material
     for(size_t i = 0; i < file_size; i++)
         pixels_per_material[i] = 0;
     
-    for(size_t i = 0; i < n_pixels; i++)
+    for(size_t i = 0; i < n_pixels; i++) 
         pixels_per_material[nearest_materials_image[i]]++;
 
     for(size_t i = 0; i < file_size; i++){

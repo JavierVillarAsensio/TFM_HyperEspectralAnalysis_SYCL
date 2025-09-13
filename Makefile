@@ -61,7 +61,7 @@ $(image_writer_binary): $(object_files_folder)/ENVI_reader.o $(object_files_fold
 # --------------------------- run --------------------------- #
 
 run_test: $(test_binary) clean_output
-	./$(test_binary) -s $(test_folder)$(test_spectrums) -i $(test_folder)$(JR_folder)$(test_folder_extension)
+	./$(test_binary) -s $(test_folder)$(test_spectrums) -i $(test_folder)$(JR_folder)$(test_folder_extension) -d GPU
 
 run_Analyzer: $(binary) clean_output
 	./$(binary) -s $(test_spectrums_folder) -i $(analyzer_JR_folder)

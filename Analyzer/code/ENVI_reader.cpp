@@ -7,6 +7,7 @@
 #include <cstring>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 
 
 
@@ -164,8 +165,6 @@ void save_reflectances(ifstream& file, float* reflectances, ENVI_properties& pro
         reflectances[reflectances_index++] = previous_reflectance;
 }
 
-
-
 namespace ENVI_reader {
     /**
      * @brief Check every property read of the struct if it is correctly initialized
@@ -291,14 +290,14 @@ namespace ENVI_reader {
      * @param filename Path to the hiperespectral image
      * @return EXIT_SUCCESS or EXIT_FAILURE if any error is detected
      */
-    exit_code read_img_bil(float *img, const ENVI_properties& properties, const string filename) {
+    exit_code read_img(float *img, const ENVI_properties& properties, const string filename) {
         ifstream file(filename, ios::binary | ios::ate);
         if(!file.is_open()){
             cerr << "Error opening the img file, it could not be opened." << endl;
             return EXIT_FAILURE;
         }
 
-        size_t image_size_3D = properties.get_image_3Dsize(), data_size = properties.data_type_size, index = 0;
+        size_t image_size_3D = properties.get_image_3Dsize(), data_size = properties.data_type_size, read_index = 0;
 
         streamsize file_size = file.tellg();
         file.seekg(0, ios::beg);
@@ -309,17 +308,11 @@ namespace ENVI_reader {
         }
 
         short int data;
-        float refl;
         streampos offset = streampos(properties.header_offset);
         file.seekg(offset, ios::beg);
-        while(index < image_size_3D) {
+        while(read_index < image_size_3D) {
             file.read(reinterpret_cast<char*>(&data), data_size);
-            refl = static_cast<float>(data);
-            
-            if(refl < 0)
-                refl = refl * -1.0f; //if the reflectance is negative it is set to positive
-
-            img[index++] = refl;
+            img[read_index++] = fabs(static_cast<float>(data));
         }
 
         file.close();

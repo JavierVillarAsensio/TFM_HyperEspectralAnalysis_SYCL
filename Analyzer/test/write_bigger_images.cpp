@@ -211,7 +211,7 @@ int main(int argc, char* argv[]) {
 
 
     float* img = (float*)malloc(original_p.get_image_3Dsize() * sizeof(float));
-    ENVI_reader::read_img_bil(img, original_p, original_img_path);
+    ENVI_reader::read_img(img, original_p, original_img_path);
 
 
     ENVI_reader::ENVI_properties bigger_p;

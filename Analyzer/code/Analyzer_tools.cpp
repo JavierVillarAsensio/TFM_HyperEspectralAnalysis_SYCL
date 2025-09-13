@@ -39,6 +39,31 @@ void initialize_pointer(T*& ptr, size_t ptr_size, bool set_values = false, float
             ptr[i] = value;
 }
 
+template<template <typename> typename Functor>
+void common_analysis(Analyzer_tools::Analyzer_properties& analyzer_properties, sycl::queue& device_q, Analyzer_variant& img_d, Analyzer_variant& spectrums_d, Analyzer_variant& results_d, Event_opt& kernel_finished) {
+    using Static_f = Functor<float*>;
+
+    size_t results_size = Static_f::get_results_size(analyzer_properties.envi_properties.lines, 
+                                                      analyzer_properties.envi_properties.samples, 
+                                                      analyzer_properties.envi_properties.bands, 
+                                                      analyzer_properties.n_spectrums, 
+                                                      analyzer_properties.ND_kernel);
+
+    float* final_results_h = (float*)malloc(results_size * sizeof(float));
+    Event_opt copied_event;
+    Analyzer_tools::copy_to_device(analyzer_properties.USE_ACCESSORS, device_q, results_d, final_results_h, results_size, &copied_event);
+
+    Event_opt results_initialized;
+    results_initialized = Analyzer_tools::launch_kernel<Functors::Results_initilizer>(device_q, copied_event, analyzer_properties, array{results_d}, Static_f::results_initial_value());
+
+    kernel_finished = Analyzer_tools::launch_kernel<Functor>(device_q, results_initialized, analyzer_properties, array{img_d, spectrums_d, results_d}, 
+                                                                         analyzer_properties.n_spectrums,
+                                                                         analyzer_properties.envi_properties.lines,
+                                                                         analyzer_properties.envi_properties.samples,
+                                                                         analyzer_properties.envi_properties.bands,
+                                                                         analyzer_properties.coalescent_read_size);
+}
+
 namespace Analyzer_tools {
 
     Analyzer_properties initialize_analyzer(int argc, char** argv) {
@@ -163,7 +188,7 @@ namespace Analyzer_tools {
         sycl::device best_device;
         int best_score = -1;
 
-        std::cout << "=== Dispositivos disponibles ===\n";
+        std::cout << "=== Available devices ===\n";
 
         for (const auto& platform : platforms) {
             for (const auto& dev : platform.get_devices()) {
@@ -173,8 +198,8 @@ namespace Analyzer_tools {
                     dev.is_cpu() ? "CPU" :
                     dev.is_accelerator() ? "Accelerator" : "Otro";
 
-                std::cout << "Nombre: " << dev.get_info<sycl::info::device::name>() << "\n";
-                std::cout << "  Tipo: " << type << "\n";
+                std::cout << "Name: " << dev.get_info<sycl::info::device::name>() << "\n";
+                std::cout << "  Type: " << type << "\n";
                
             }
     }
@@ -290,7 +315,7 @@ namespace Analyzer_tools {
                     cerr << "ERROR: Could not find an .img file in the path: " << analyzer_properties.image_hdr_folder_path << ". Aborting..." << endl;
                     return EXIT_FAILURE;
                 }
-                if(ENVI_reader::read_img_bil(img, analyzer_properties.envi_properties, img_path)) {
+                if(ENVI_reader::read_img(img, analyzer_properties.envi_properties, img_path)) {
                     cerr << "ERROR reading hyperespectral image. Aborting..." << endl;
                     free(img);
                     return EXIT_FAILURE;
@@ -342,54 +367,16 @@ namespace Analyzer_tools {
     exit_code launch_analysis(Analyzer_tools::Analyzer_properties& analyzer_properties, sycl::queue& device_q, Analyzer_variant& img_d, Analyzer_variant& spectrums_d, Analyzer_variant& results_d, Event_opt& kernel_finished) {
         switch (analyzer_properties.algorithm){
             case Analyzer_tools::Analyzer_algorithms::EUCLIDEAN: {
-                    using Euclidean = Functors::Euclidean<float*>;
-
-                    size_t results_size = Euclidean::get_results_size(analyzer_properties.envi_properties.lines, 
-                                                                    analyzer_properties.envi_properties.samples, 
-                                                                    analyzer_properties.envi_properties.bands, 
-                                                                    analyzer_properties.n_spectrums, 
-                                                                    analyzer_properties.ND_kernel);
-
-                    float* final_results_h;
-                    initialize_pointer(final_results_h, results_size, true, FLOAT_MAX);
-
-                    Event_opt copied_event;
-                    Analyzer_tools::copy_to_device(analyzer_properties.USE_ACCESSORS, device_q, results_d, final_results_h, results_size, &copied_event);
-
-                    kernel_finished = Analyzer_tools::launch_kernel<Functors::Euclidean>(device_q, copied_event, analyzer_properties, array{img_d, spectrums_d, results_d}, 
-                                                            analyzer_properties.n_spectrums,
-                                                            analyzer_properties.envi_properties.lines,
-                                                            analyzer_properties.envi_properties.samples,
-                                                            analyzer_properties.envi_properties.bands,
-                                                            analyzer_properties.coalescent_read_size);
+                    common_analysis<Functors::Euclidean>(analyzer_properties, device_q, img_d, spectrums_d, results_d, kernel_finished);
                     break;
                 }
 
-                case Analyzer_tools::Analyzer_algorithms::CCM: {
-                    using CCM = Functors::CCM<float*>;
-
-                    size_t results_size = CCM::get_results_size(analyzer_properties.envi_properties.lines, 
-                                                                    analyzer_properties.envi_properties.samples, 
-                                                                    analyzer_properties.envi_properties.bands, 
-                                                                    analyzer_properties.n_spectrums, 
-                                                                    analyzer_properties.ND_kernel);
-
-                    float* final_results_h;
-                    initialize_pointer(final_results_h, results_size, true, -1.0f);
-
-                    Event_opt copied_event;
-                    Analyzer_tools::copy_to_device(analyzer_properties.USE_ACCESSORS, device_q, results_d, final_results_h, results_size, &copied_event);
-
-                    kernel_finished = Analyzer_tools::launch_kernel<Functors::CCM>(device_q, copied_event, analyzer_properties, array{img_d, spectrums_d, results_d}, 
-                                                            analyzer_properties.n_spectrums,
-                                                            analyzer_properties.envi_properties.lines,
-                                                            analyzer_properties.envi_properties.samples,
-                                                            analyzer_properties.envi_properties.bands,
-                                                            analyzer_properties.coalescent_read_size);
+                case Analyzer_tools::Analyzer_algorithms::CCM: { 
+                    common_analysis<Functors::CCM>(analyzer_properties, device_q, img_d, spectrums_d, results_d, kernel_finished);
                     break;
                 }
             default:
-                std::cout << "Error: Algorithm not implemented" << std::endl;
+                cerr << "Error: Algorithm not implemented" << endl;
                 return EXIT_FAILURE;
                 break;
         }
