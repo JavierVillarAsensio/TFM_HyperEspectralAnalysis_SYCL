@@ -162,7 +162,6 @@ namespace Functors {
             //spectrum to be compared
             size_t spectrum_offset = (wi_id % this->n_spectrums) * this->bands_size;
 
-            //bil img offset
             size_t img_offset = (wi_id / this->n_spectrums) * this->bands_size;
 
             //pixel to be compared
@@ -349,8 +348,7 @@ namespace Functors {
         void operator()(sycl::id<1> id) const {
             size_t wi_id = id.get(0);
 
-            //bil img offset                      line                                   line size                                line offset
-            size_t img_offset = ((wi_id / this->n_spectrums) / this->n_cols) * (this->n_cols * this->bands_size) + ((wi_id / this->n_spectrums) % this->n_cols);
+            size_t img_offset = (wi_id / this->n_spectrums) * this->bands_size;
 
             size_t spectrum_offset = (wi_id % this->n_spectrums) * this->bands_size;
 
@@ -361,7 +359,7 @@ namespace Functors {
             float pixel_value, spectrum_value;
 
             for(size_t i = 0; i < this->bands_size; i++) {
-                pixel_value = this->img_d[img_offset + (i * this->n_cols)];
+                pixel_value = this->img_d[img_offset + i];
                 spectrum_value = this->spectrums_d[spectrum_offset + i];
 
                 sum_pixel_values += pixel_value;
@@ -401,7 +399,7 @@ namespace Functors {
             size_t local_id = id.get_local_linear_id();
 
             //bil img offset              line                          line size                     group sample
-            size_t img_offset = ((group_id / this->n_cols) * (this->n_cols * this->bands_size)) + (group_id % this->n_cols);
+            size_t img_offset = group_id * this->bands_size;
             size_t spectrum_offset = local_id * this->bands_size;
 
             float sum_pixel_values = 0, sum_reference_values = 0;
@@ -411,7 +409,7 @@ namespace Functors {
             float pixel_value, spectrum_value;
 
             for(size_t i = 0; i < this->bands_size; i++) {
-                pixel_value = this->img_d[img_offset + (i * this->n_cols)];
+                pixel_value = this->img_d[img_offset + i];
                 spectrum_value = this->spectrums_d[spectrum_offset + i];
 
                 sum_pixel_values += pixel_value;

@@ -560,9 +560,9 @@ void kernel_tests(int& tests_done, int& tests_passed) {
     test(test_ND_euclidean, "ND euclidean kernel", tests_passed, tests_done);
     free_resources(img_h, spectrums_h, img_d, spectrums_d);
     //test(test_ND_localMem_euclidean, "ND with local memory euclidean kernel", tests_passed, tests_done);
-    //initialize_CCM();
-    //test(test_basic_CCM, "basic CCM kernel", tests_passed, tests_done);
-    //test(test_ND_CCM, "ND CCM kernel", tests_passed, tests_done);
+    initialize_CCM();
+    test(test_basic_CCM, "basic CCM kernel", tests_passed, tests_done);
+    test(test_ND_CCM, "ND CCM kernel", tests_passed, tests_done);
     free_resources(img_h_CCM, spectrums_h_CCM, img_d_CCM, spectrums_d_CCM);
 }
 
