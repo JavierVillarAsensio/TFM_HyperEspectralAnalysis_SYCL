@@ -146,16 +146,13 @@ int main(int argc, char* argv[]) {
     float* spectrums_h;
     string* names;
 
-    /*
-    //ENVI files
-    if(Analyzer_tools::read_spectrums(analyzer_properties, n_spectrums, spectrums_h, names))
-        return EXIT_FAILURE;
-    */
-
-    
-    //Jasper Ridge files
-    if(read_spectrums_JasperRidge(analyzer_properties, spectrums_h, names, n_spectrums))
-        return EXIT_FAILURE;
+    if constexpr(JR) {
+        if(read_spectrums_JasperRidge(analyzer_properties, spectrums_h, names, n_spectrums))
+            return EXIT_FAILURE;
+    } else {
+        if(Analyzer_tools::read_spectrums(analyzer_properties, n_spectrums, spectrums_h, names))
+            return EXIT_FAILURE;
+    }
     
 
     free(img_h);
@@ -225,8 +222,19 @@ int main(int argc, char* argv[]) {
                       concatenate_times(init,  start_copy_img, start_scale_img, start_copy_spectrums, start_kernel, end))) {
         cout << "ERROR: creating results files. Aborting..." << endl;
         free(nearest_materials_image);
+        delete[] names;
         return EXIT_FAILURE;
     }
+
+    if constexpr(JR) {
+        if(compare_result(nearest_materials_image, analyzer_properties, names)) {
+            cerr << "ERROR: comparing JasperRidge results. Aborting...";
+            free(nearest_materials_image);
+            delete[] names;
+            return EXIT_FAILURE;
+        }
+    }
+
     cout << "Results files created with no errors." << endl;
     free(nearest_materials_image);
     delete[] names;

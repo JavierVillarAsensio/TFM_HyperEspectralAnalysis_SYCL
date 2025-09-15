@@ -40,7 +40,7 @@ $(object_files_folder)/tests.o: $(test_folder)/tests.cpp $(include_folder)/Analy
 	$(cxx) $(include_test) -c $< -o $@
 
 $(object_files_folder)/Analyzer.o: $(cpp_folder)/Analyzer.cpp $(include_folder)/Analyzer_tools.hpp $(include_folder)/ENVI_reader.hpp $(include_folder)/Functors.hpp $(include_folder)/Results_writer.hpp | $(object_files_folder)
-	$(cxx) -c $< -o $@
+	$(cxx) -c $< -lmatio -o $@
 
 $(object_files_folder)/write_bigger_images.o: $(test_folder)/write_bigger_images.cpp $(include_folder)/ENVI_reader.hpp | $(object_files_folder)
 	$(cxx) -c $< -o $@
@@ -53,7 +53,7 @@ $(test_binary): $(test_precompiled)
 
 $(binary): $(analyzer_precompiled) 
 	$(MAKE) clean
-	$(cxx) $^ -o $@
+	$(cxx) $^ -lmatio -o $@
 
 $(image_writer_binary): $(object_files_folder)/ENVI_reader.o $(object_files_folder)/write_bigger_images.o | $(object_files_folder)
 	$(cxx) $^ -o $@
