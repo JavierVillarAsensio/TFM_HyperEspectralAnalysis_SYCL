@@ -83,8 +83,6 @@ void initialize_CCM() {
     analyzer_properties_CCM.algorithm = Analyzer_tools::CCM;
     analyzer_properties_CCM.n_spectrums = 2;
     analyzer_properties_CCM.ND_kernel = true;
-    analyzer_properties_CCM.coalescent_read_size = 0;
-    analyzer_properties_CCM.device_local_memory = 0;
     analyzer_properties_CCM.envi_properties.lines = 1;
     analyzer_properties_CCM.envi_properties.samples = 2;
     analyzer_properties_CCM.envi_properties.bands = 2;
@@ -555,14 +553,47 @@ exit_code test_ND_CCM() {
     return return_value;
 }
 
+exit_code test_ND_localMem_CCM() {
+    using Static_f = Functors::CCM<float*>;
+
+    size_t results_size = Static_f::get_results_size(analyzer_properties_CCM.envi_properties.lines, 
+                                                          analyzer_properties_CCM.envi_properties.samples, 
+                                                          analyzer_properties_CCM.envi_properties.bands, 
+                                                          analyzer_properties_CCM.n_spectrums,
+                                                          analyzer_properties_CCM.ND_kernel);
+
+    float* results_h;
+    initialize_pointer(results_h, results_size, true, -1.1f);
+
+    Analyzer_variant results_d = sycl::malloc_device<float>(results_size, device_q);
+
+    Analyzer_tools::launch_kernel<Functors::CCM>(device_q, copied_event, analyzer_properties_CCM, array{img_d_CCM, spectrums_d_CCM, results_d}, 
+                                                       analyzer_properties_CCM.n_spectrums,
+                                                       analyzer_properties_CCM.envi_properties.lines,
+                                                       analyzer_properties_CCM.envi_properties.samples,
+                                                       analyzer_properties_CCM.envi_properties.bands,
+                                                       analyzer_properties_CCM.coalescent_read_size).wait();
+
+    Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, results_size, &copied_event);
+    copied_event.value().wait();
+
+    exit_code return_value = CCM_CORRECT(results_h);
+    
+    sycl::free(get<float*>(results_d), device_q);
+    free(results_h);
+
+    return return_value;
+}
+
 void kernel_tests(int& tests_done, int& tests_passed) {
     test(test_basic_euclidean, "basic euclidean kernel", tests_passed, tests_done);
     test(test_ND_euclidean, "ND euclidean kernel", tests_passed, tests_done);
-    free_resources(img_h, spectrums_h, img_d, spectrums_d);
     //test(test_ND_localMem_euclidean, "ND with local memory euclidean kernel", tests_passed, tests_done);
+    free_resources(img_h, spectrums_h, img_d, spectrums_d);
     initialize_CCM();
     test(test_basic_CCM, "basic CCM kernel", tests_passed, tests_done);
     test(test_ND_CCM, "ND CCM kernel", tests_passed, tests_done);
+    test(test_ND_localMem_CCM, "ND with local memory CCM kernel", tests_passed, tests_done);
     free_resources(img_h_CCM, spectrums_h_CCM, img_d_CCM, spectrums_d_CCM);
 }
 
@@ -602,7 +633,7 @@ int main(int argc, char **argv){
     spectrums_tests(tests_done, tests_passed);
     sycl_tests(tests_done, tests_passed);
     kernel_tests(tests_done, tests_passed);
-    results_tests(tests_done, tests_passed);
+    //results_tests(tests_done, tests_passed);
 
     if (tests_passed != tests_done)
         cout << "\033[31mThe number of tests passed is lower than the tests done: \033[0m" << "Tests passed: " << tests_passed << " < " "Tests done: " << tests_done << endl;

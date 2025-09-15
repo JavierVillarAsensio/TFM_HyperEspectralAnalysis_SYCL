@@ -175,7 +175,6 @@ int main(int argc, char* argv[]) {
     CHR_time_point start_kernel = chrono::high_resolution_clock::now();
     
     /////////////////////////////launch kernel////////////////////////////////
-    analyzer_properties.device_local_memory = 1; // local memory causes crash, needs investigation
     Event_opt kernel_finished;
     cout << "Launching analysis kernel..." << endl;
     if(Analyzer_tools::launch_analysis(analyzer_properties, device_q, img_d, spectrums_d, results_d, kernel_finished)) {

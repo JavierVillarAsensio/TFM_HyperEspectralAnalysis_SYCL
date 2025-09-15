@@ -30,7 +30,7 @@ image_writer_binary = bigger_images_writer
 $(object_files_folder)/ENVI_reader.o: $(cpp_folder)/ENVI_reader.cpp $(include_folder)/ENVI_reader.hpp | $(object_files_folder)
 	$(cxx) -c $< -o $@
 
-$(object_files_folder)/Results_writer.o: $(cpp_folder)/Results_writer.cpp $(include_folder)/Results_writer.hpp | $(object_files_folder)
+$(object_files_folder)/Results_writer.o: $(cpp_folder)/Results_writer.cpp $(include_folder)/Results_writer.hpp $(include_folder)/Analyzer_tools.hpp | $(object_files_folder)
 	$(cxx) -c $< -o $@
 
 $(object_files_folder)/Analyzer_tools.o: $(cpp_folder)/Analyzer_tools.cpp $(include_folder)/Analyzer_tools.hpp $(include_folder)/ENVI_reader.hpp $(include_folder)/Functors.hpp | $(object_files_folder)
