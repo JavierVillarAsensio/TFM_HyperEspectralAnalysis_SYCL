@@ -35,9 +35,9 @@ namespace Functors {
 
         static inline constexpr size_t get_n_access_points() { return 3; }
         static inline const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return 0; }
-        static inline const size_t get_range_local_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return 0; }
+        static inline const size_t get_range_local_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, size_t max_ND_size, size_t max_local_mem_size) { return 0; }
         static inline const size_t get_results_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool nd) { return 0; }
-        static inline const size_t get_local_mem_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, size_t other) { return 0; }
+        static inline const size_t get_local_mem_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, size_t local_range) { return 0; }
         static inline constexpr bool has_ND() { return true; }
         static inline constexpr float results_initial_value() { return 0.f; }
 
@@ -75,37 +75,29 @@ namespace Functors {
     struct ImgSerializer : BaseFunctor<Data_access> {
         Data_access img_read;
         Data_access img_reordered;
-        size_t n_cols, bands_size;
+        size_t n_cols, n_lines;
         int interleave; //BSQ == 0, BIL == 1, BIP == 2
-        size_t line_size;
-        float scale_factor;
 
-        ImgSerializer(Data_access img_read_in, Data_access img_reordered_in, size_t n_cols_in, size_t bands_size_in, int interleave_in, float scale_factor_in) 
+        ImgSerializer(Data_access img_read_in, Data_access img_reordered_in, size_t n_cols_in, size_t n_lines_in, int interleave_in) 
         : img_read(img_read_in), 
           img_reordered(img_reordered_in),
           n_cols(n_cols_in),
-          bands_size(bands_size_in),
-          interleave(interleave_in),
-          line_size(n_cols_in * bands_size_in),
-          scale_factor(scale_factor_in) {}
+          n_lines(n_lines_in),
+          interleave(interleave_in) {}
         
         inline static constexpr size_t get_n_access_points() { return 2; }
-        inline static const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return lines * cols * bands; }
+        inline static const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return lines * cols; }
         inline static constexpr bool has_ND() { return false; }
 
         void operator()(sycl::id<1> id) const {
             size_t new_index;
             if(interleave == 1) {   //BIL
-                size_t line = id / line_size;
-                size_t sample = id % n_cols;
-                size_t band = (id / n_cols) % bands_size;
-
-                new_index = (line * line_size) + (sample * bands_size) + band;
+                new_index = id;
             }
             else    //not implemented
                 new_index = id;
         
-            img_reordered[new_index] = img_read[id]/scale_factor;
+            img_reordered[id] = img_read[id];
         } 
     };
 
@@ -136,16 +128,13 @@ namespace Functors {
                 return lines * cols * n_spectrums;
         }
 
-        inline static size_t get_range_local_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { 
-            if(has_local_mem)
-                return cols; 
-            else
-                return n_spectrums;
+        inline static size_t get_range_local_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, size_t max_ND_size, size_t max_local_mem_size) { 
+            return cols; 
         }
 
-        inline static size_t get_local_mem_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, size_t other) {
+        inline static size_t get_local_mem_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, size_t local_range) {
             //      image portion        spectrum    results portion
-            return (other * bands)    +    bands    +    other; 
+            return (local_range * bands)    +    bands    +    local_range; 
         }
           
         static inline constexpr float results_initial_value() { return FLOAT_MAX; }
@@ -290,13 +279,27 @@ namespace Functors {
                 return lines * cols * 2; 
         }
 
-        inline static size_t get_range_global_size(size_t lines, size_t cols, size_t n_bands, size_t n_spectrums, bool has_local_mem) { return lines * cols * n_spectrums; }
+        inline static size_t get_range_global_size(size_t lines, size_t cols, size_t n_bands, size_t n_spectrums, bool has_local_mem) { return lines * cols; }
 
-        inline static size_t get_range_local_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) {return cols; }
+        static size_t get_range_local_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, size_t max_ND_size, size_t max_local_mem_size) {
+            size_t spectra_local_mem_needed = (n_spectrums * bands) * sizeof(float);
+            
+            size_t local_size = 1;
+            size_t global_size = lines * cols;
+            for(size_t i = 2; i < max_ND_size; i++) {
+                if((spectra_local_mem_needed + (i * bands * sizeof(float))) > max_local_mem_size)
+                    break;
+                
+                if(global_size % i == 0)
+                    local_size = i;
+            }
+
+            return local_size;
+        }
 
         inline static size_t get_local_mem_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, size_t local_range) {
             //      image portion            spectra
-            return ((local_range / n_spectrums) * bands) + (bands * n_spectrums) + ((local_range / n_spectrums) * (n_spectrums - 1)); 
+            return (local_range * bands) + (n_spectrums * bands); 
         }
             
         static inline constexpr float results_initial_value() { return -1.1f; }
@@ -356,70 +359,68 @@ namespace Functors {
             size_t local_id = id.get_local_linear_id();
             size_t local_range = id.get_local_range()[0];
 
-            size_t local_img_copied_size = (local_range / this->n_spectrums) * this->bands_size;
-            size_t global_img_offset = group_id * local_img_copied_size;
-            size_t spectrum_offset = (local_id % this->n_spectrums) * this->bands_size;
-            size_t local_spectrum_offset = local_img_copied_size + spectrum_offset;
-
-            size_t img_copy_size = this->bands_size * local_range;
-            size_t spectra_copy_size = this->bands_size * this->n_spectrums;
+            size_t global_img_index_start = (((group_id * local_range + local_id) / this->n_cols) * (this->n_cols * this->bands_size)) + ((group_id * local_range) % this->n_cols) + local_id;
+            size_t global_img_index_end = global_img_index_start + (this->n_cols * this->bands_size);
 
             //copy img to local memory coalesced
-            for(size_t copy_img = local_id; copy_img < img_copy_size; copy_img += local_range)
-                local_mem[copy_img] = this->img_d[global_img_offset + copy_img];
+            size_t local_stride = local_id;
+            for(size_t copy_img = global_img_index_start; copy_img < global_img_index_end; copy_img += this->n_cols) {
+                local_mem[local_stride] = this->img_d[copy_img];
+                local_stride += local_range;
+            }
 
             //copy spectra to local memory coalesced
+            size_t spectra_copy_size = this->n_spectrums * this->bands_size;
+            size_t img_copied_size = local_range * this->bands_size;
             for(size_t copy_spec = local_id; copy_spec < spectra_copy_size; copy_spec += local_range)
-                local_mem[local_img_copied_size + copy_spec] = this->spectrums_d[copy_spec];
+                local_mem[img_copied_size + copy_spec] = this->spectrums_d[copy_spec];
 
-            size_t local_img_offset = (local_id / this->n_spectrums) * this->bands_size;
+            size_t local_img_offset = local_id;
+            size_t local_spectrum_offset = img_copied_size;
 
-            float sum_pixel_values = 0, sum_reference_values = 0;
-            float sum_sqrd_pixel_values = 0, sum_sqrd_reference_values = 0;
-            float sum_pixel_by_reference_values = 0;
+            float sum_pixel_values, sum_reference_values;
+            float sum_sqrd_pixel_values, sum_sqrd_reference_values;
+            float sum_pixel_by_reference_values;
 
             float pixel_value, spectrum_value;
+            float numerator, denominator, correlation;
+
+            float highest_correlation = -1.1f; //the lowest correlation is -1 so every correlation will be higher
+            float best_spectrum_index = this->n_spectrums; //incorrect value
 
             id.barrier(); //wait until the local memory copy is finished
 
-            #pragma unroll 10   //the number of bands usually is between 150 and 250 so unroll 10 iterations by 10 is not too much
-            for(size_t i = 0; i < this->bands_size; i++) {
-                pixel_value = local_mem[local_img_offset + i];
-                spectrum_value = local_mem[local_spectrum_offset + i];
+            for(size_t spectrum = 0; spectrum < this->n_spectrums; spectrum++) {
 
-                sum_pixel_values += pixel_value;
-                sum_reference_values += spectrum_value;
+                sum_pixel_values = 0, sum_reference_values = 0;
+                sum_sqrd_pixel_values = 0, sum_sqrd_reference_values = 0;
+                sum_pixel_by_reference_values = 0;
 
-                sum_sqrd_pixel_values += pixel_value * pixel_value;
-                sum_sqrd_reference_values += spectrum_value * spectrum_value;
+                #pragma unroll 10   //the number of bands usually is between 150 and 250 so unroll 10 iterations by 10 is not too much
+                for(size_t i = 0; i < this->bands_size; i ++) {
+                    pixel_value = local_mem[local_img_offset + (i * local_range)];
+                    spectrum_value = local_mem[local_spectrum_offset++];
 
-                sum_pixel_by_reference_values += pixel_value * spectrum_value;
-            }
+                    sum_pixel_values += pixel_value;
+                    sum_reference_values += spectrum_value;
 
-            //Pearson correlation coefficient formula
-            float numerator = this->bands_size * sum_pixel_by_reference_values - sum_pixel_values * sum_reference_values;
-            float denominator = sycl::sqrt((this->bands_size * sum_sqrd_pixel_values - sum_pixel_values * sum_pixel_values) * (this->bands_size * sum_sqrd_reference_values - sum_reference_values * sum_reference_values));
-            float correlation = numerator / denominator;
+                    sum_sqrd_pixel_values += pixel_value * pixel_value;
+                    sum_sqrd_reference_values += spectrum_value * spectrum_value;
 
-            size_t temp_result_pixel_offset = local_img_copied_size + (this->n_spectrums * this->bands_size) + ((local_id / this->n_spectrums) * (this->n_spectrums - 1));
-            if(!(local_id % this->n_spectrums == 0))
-                local_mem[temp_result_pixel_offset + local_id - 1] = correlation;
+                    sum_pixel_by_reference_values += pixel_value * spectrum_value;
+                }
 
-            id.barrier(); //wait until all the correlations are calculated and stored
+                //Pearson correlation coefficient formula
+                numerator = this->bands_size * sum_pixel_by_reference_values - sum_pixel_values * sum_reference_values;
+                denominator = sycl::sqrt((this->bands_size * sum_sqrd_pixel_values - sum_pixel_values * sum_pixel_values) * (this->bands_size * sum_sqrd_reference_values - sum_reference_values * sum_reference_values));
+                correlation = numerator / denominator;
 
-            if(local_id % this->n_spectrums == 0) {
-                size_t local_mem_offset_end = temp_result_pixel_offset + this->n_spectrums - 1;
-                size_t correct_id = local_id % this->n_spectrums;
-                for(size_t i = temp_result_pixel_offset; i < local_mem_offset_end; i++)
-                    if(local_mem[i] > correlation) {
-                        correlation = local_mem[i];
-                        correct_id = ((i - temp_result_pixel_offset) % this->n_spectrums) + 1;
-                    }
-
-                this->results_d[group_id * (local_range / this->n_spectrums) + (local_id / this->n_spectrums)] = correct_id;
-            }
-            
-
+                if(correlation > highest_correlation) {
+                    highest_correlation = correlation;
+                    best_spectrum_index = spectrum;
+                }
+            } 
+            this->results_d[group_id * local_range + local_id] = best_spectrum_index;
         }
     
         //kernel for ND without local mem

@@ -145,11 +145,7 @@ namespace Analyzer_tools {
             Range_variant var_range;
         
             size_t global_size = Static_f::get_range_global_size(p.envi_properties.lines, p.envi_properties.samples, p.envi_properties.bands, p.n_spectrums, HAS_LOCAL_MEM(p));
-
-            size_t local_size = 1;
-            for(size_t i = 1; i < p.ND_max_item_work_group_size; i++)
-                if((global_size % i == 0) && (p.n_spectrums % i == 0))
-                    local_size = i;
+            size_t local_size = Static_f::get_range_local_size(p.envi_properties.lines, p.envi_properties.samples, p.envi_properties.bands, p.n_spectrums, p.ND_max_item_work_group_size, p.device_local_memory);
 
             var_range = p.ND_kernel && p.ND_max_item_work_group_size >= local_size && Static_f::has_ND() && local_size > 1
                 ? var_range = sycl::nd_range<1> {sycl::range<1> {global_size}, sycl::range<1> {local_size}} 

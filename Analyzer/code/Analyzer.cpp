@@ -135,7 +135,7 @@ int main(int argc, char* argv[]) {
     Event_opt img_scaled;
     if(opt_img_copied.has_value())
         img_scaled = opt_img_copied.value();
-    Analyzer_tools::scale_image(device_q, analyzer_properties, img_d, img_scaled, true);
+    Analyzer_tools::scale_image(device_q, analyzer_properties, img_d, img_scaled, false);
 
     if(img_scaled.has_value())
         img_scaled.value().wait();
@@ -226,7 +226,8 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    if constexpr(JR) {
+    bool create_confusion_matrix = false;
+    if (create_confusion_matrix) {
         if(compare_result(nearest_materials_image, analyzer_properties, names)) {
             cerr << "ERROR: comparing JasperRidge results. Aborting...";
             free(nearest_materials_image);

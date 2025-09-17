@@ -369,9 +369,8 @@ namespace Analyzer_tools {
 
                 img_scaled = Analyzer_tools::launch_kernel<Functors::ImgSerializer>(device_q, img_scaled, analyzer_properties, array{img_d, img_reordered},
                                                                                     analyzer_properties.envi_properties.samples,
-                                                                                    analyzer_properties.envi_properties.bands,
-                                                                                    analyzer_properties.envi_properties.interleave,
-                                                                                    analyzer_properties.envi_properties.reflectance_scale_factor/PERCENTAGE_FACTOR);
+                                                                                    analyzer_properties.envi_properties.lines,
+                                                                                    analyzer_properties.envi_properties.interleave);
 
                 img_d = img_reordered;
             }
