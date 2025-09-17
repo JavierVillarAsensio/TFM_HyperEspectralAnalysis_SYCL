@@ -6,6 +6,44 @@
 
 #define FLOAT_MAX 3.4028235e+38
 
+template<typename Data_access>
+inline float compute_correlation(
+    size_t pixel_base_idx,
+    size_t spectrum_idx,
+    size_t local_range,
+    sycl::local_accessor<float, 1> &local_mem,
+    const Data_access& spectrums_d,
+    size_t bands_size
+) {
+        float sum_pixel_values = 0.0f;
+        float sum_reference_values = 0.0f;
+        float sum_sqrd_pixel_values = 0.0f;
+        float sum_sqrd_reference_values = 0.0f;
+        float sum_pixel_by_reference_values = 0.0f;
+
+        #pragma unroll 10
+        for (size_t i = 0; i < bands_size; i++) {
+            float pixel_value = local_mem[pixel_base_idx + i * local_range];
+            float spectrum_value = spectrums_d[spectrum_idx * bands_size + i];
+
+            sum_pixel_values += pixel_value;
+            sum_reference_values += spectrum_value;
+
+            sum_sqrd_pixel_values += pixel_value * pixel_value;
+            sum_sqrd_reference_values += spectrum_value * spectrum_value;
+
+            sum_pixel_by_reference_values += pixel_value * spectrum_value;
+        }
+
+        float numerator = bands_size * sum_pixel_by_reference_values - sum_pixel_values * sum_reference_values;
+        float denominator = sycl::sqrt(
+            (bands_size * sum_sqrd_pixel_values - sum_pixel_values * sum_pixel_values) *
+            (bands_size * sum_sqrd_reference_values - sum_reference_values * sum_reference_values)
+        );
+
+        return numerator / denominator;
+}
+
 namespace Functors {
     template<typename Data_access>
     struct BaseFunctor {
@@ -298,7 +336,6 @@ namespace Functors {
         }
 
         inline static size_t get_local_mem_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, size_t local_range) {
-            //      image portion            spectra
             return (local_range * bands) + (n_spectrums * bands); 
         }
             
@@ -369,22 +406,6 @@ namespace Functors {
                 local_stride += local_range;
             }
 
-            //copy spectra to local memory coalesced
-            size_t spectra_copy_size = this->n_spectrums * this->bands_size;
-            size_t img_copied_size = local_range * this->bands_size;
-            for(size_t copy_spec = local_id; copy_spec < spectra_copy_size; copy_spec += local_range)
-                local_mem[img_copied_size + copy_spec] = this->spectrums_d[copy_spec];
-
-            size_t local_img_offset = local_id;
-            size_t local_spectrum_offset = img_copied_size;
-
-            float sum_pixel_values, sum_reference_values;
-            float sum_sqrd_pixel_values, sum_sqrd_reference_values;
-            float sum_pixel_by_reference_values;
-
-            float pixel_value, spectrum_value;
-            float numerator, denominator, correlation;
-
             float highest_correlation = -1.1f; //the lowest correlation is -1 so every correlation will be higher
             float best_spectrum_index = this->n_spectrums; //incorrect value
 
@@ -392,28 +413,14 @@ namespace Functors {
 
             for(size_t spectrum = 0; spectrum < this->n_spectrums; spectrum++) {
 
-                sum_pixel_values = 0, sum_reference_values = 0;
-                sum_sqrd_pixel_values = 0, sum_sqrd_reference_values = 0;
-                sum_pixel_by_reference_values = 0;
-
-                #pragma unroll 10   //the number of bands usually is between 150 and 250 so unroll 10 iterations by 10 is not too much
-                for(size_t i = 0; i < this->bands_size; i ++) {
-                    pixel_value = local_mem[local_img_offset + (i * local_range)];
-                    spectrum_value = local_mem[local_spectrum_offset++];
-
-                    sum_pixel_values += pixel_value;
-                    sum_reference_values += spectrum_value;
-
-                    sum_sqrd_pixel_values += pixel_value * pixel_value;
-                    sum_sqrd_reference_values += spectrum_value * spectrum_value;
-
-                    sum_pixel_by_reference_values += pixel_value * spectrum_value;
-                }
-
-                //Pearson correlation coefficient formula
-                numerator = this->bands_size * sum_pixel_by_reference_values - sum_pixel_values * sum_reference_values;
-                denominator = sycl::sqrt((this->bands_size * sum_sqrd_pixel_values - sum_pixel_values * sum_pixel_values) * (this->bands_size * sum_sqrd_reference_values - sum_reference_values * sum_reference_values));
-                correlation = numerator / denominator;
+                float correlation = compute_correlation(
+                    local_id,
+                    spectrum,
+                    local_range,
+                    local_mem,
+                    this->spectrums_d,
+                    this->bands_size
+                );
 
                 if(correlation > highest_correlation) {
                     highest_correlation = correlation;
