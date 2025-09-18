@@ -42,8 +42,9 @@ void initialize_pointer(T*& ptr, size_t ptr_size, bool set_values = false, float
 }
 
 template<template <typename> typename Functor>
-void common_analysis(Analyzer_tools::Analyzer_properties& analyzer_properties, sycl::queue& device_q, Analyzer_variant& img_d, Analyzer_variant& spectrums_d, Analyzer_variant& results_d, Event_opt& kernel_finished) {
+exit_code common_analysis(Analyzer_tools::Analyzer_properties& analyzer_properties, sycl::queue& device_q, Analyzer_variant& img_d, Analyzer_variant& spectrums_d, Analyzer_variant& results_d, Event_opt& kernel_finished) {
     using Static_f = Functor<float*>;
+    exit_code return_value;
 
     size_t results_size = Static_f::get_results_size(analyzer_properties.envi_properties.lines, 
                                                       analyzer_properties.envi_properties.samples, 
@@ -56,14 +57,19 @@ void common_analysis(Analyzer_tools::Analyzer_properties& analyzer_properties, s
     Analyzer_tools::copy_to_device(analyzer_properties.USE_ACCESSORS, device_q, results_d, final_results_h, results_size, &copied_event);
 
     Event_opt results_initialized;
-    results_initialized = Analyzer_tools::launch_kernel<Functors::ResultsInitilizer>(device_q, copied_event, analyzer_properties, array{results_d}, Static_f::results_initial_value());
+    return_value = Analyzer_tools::launch_kernel<Functors::ResultsInitilizer>(device_q, copied_event, results_initialized, analyzer_properties, array{results_d}, Static_f::results_initial_value());
 
-    kernel_finished = Analyzer_tools::launch_kernel<Functor>(device_q, results_initialized, analyzer_properties, array{img_d, spectrums_d, results_d}, 
+    if(return_value != EXIT_SUCCESS)
+        return return_value;
+
+    return_value = Analyzer_tools::launch_kernel<Functor>(device_q, kernel_finished, results_initialized, analyzer_properties, array{img_d, spectrums_d, results_d}, 
                                                                          analyzer_properties.n_spectrums,
                                                                          analyzer_properties.envi_properties.lines,
                                                                          analyzer_properties.envi_properties.samples,
                                                                          analyzer_properties.envi_properties.bands,
                                                                          analyzer_properties.coalescent_read_size);
+
+    return return_value;
 }
 
 namespace Analyzer_tools {
@@ -356,6 +362,12 @@ namespace Analyzer_tools {
 
     exit_code scale_image(sycl::queue& device_q, Analyzer_tools::Analyzer_properties& analyzer_properties, Analyzer_variant& img_d, Event_opt& img_scaled, bool serialize) {
         cout << "Scaling image by reflectance scale factor..." << endl;
+        exit_code ret;
+        if(analyzer_properties.envi_properties.reflectance_scale_factor/PERCENTAGE_FACTOR == 1.f) {
+            img_scaled = nullopt;
+            cout << "Image scaling not needed." << endl;
+            return EXIT_SUCCESS;
+        }
         try {
             if(serialize) {
                 size_t img_size = analyzer_properties.envi_properties.get_image_3Dsize();
@@ -367,7 +379,7 @@ namespace Analyzer_tools {
                 else
                     img_reordered = sycl::malloc_device<float>(img_size, device_q);
 
-                img_scaled = Analyzer_tools::launch_kernel<Functors::ImgSerializer>(device_q, img_scaled, analyzer_properties, array{img_d, img_reordered},
+                ret = Analyzer_tools::launch_kernel<Functors::ImgSerializer>(device_q, img_scaled, img_scaled, analyzer_properties, array{img_d, img_reordered},
                                                                                     analyzer_properties.envi_properties.samples,
                                                                                     analyzer_properties.envi_properties.lines,
                                                                                     analyzer_properties.envi_properties.interleave);
@@ -375,32 +387,23 @@ namespace Analyzer_tools {
                 img_d = img_reordered;
             }
             else
-                img_scaled = Analyzer_tools::launch_kernel<Functors::ImgScaler>(device_q, img_scaled, analyzer_properties, array{img_d}, analyzer_properties.envi_properties.reflectance_scale_factor/PERCENTAGE_FACTOR);
+                ret = Analyzer_tools::launch_kernel<Functors::ImgScaler>(device_q, img_scaled, img_scaled, analyzer_properties, array{img_d}, analyzer_properties.envi_properties.reflectance_scale_factor/PERCENTAGE_FACTOR);
         } catch (const sycl::exception &e) {
             std::cerr << "Error when launching SYCL kernel to scale image, error message: " << e.what() << std::endl;
             return EXIT_FAILURE;
         }
         cout << "Image scaled with no errors." << endl;
-        return EXIT_SUCCESS;
+        return ret;
     }
 
     exit_code launch_analysis(Analyzer_tools::Analyzer_properties& analyzer_properties, sycl::queue& device_q, Analyzer_variant& img_d, Analyzer_variant& spectrums_d, Analyzer_variant& results_d, Event_opt& kernel_finished) {
         switch (analyzer_properties.algorithm){
-            case Analyzer_tools::Analyzer_algorithms::EUCLIDEAN: {
-                    common_analysis<Functors::Euclidean>(analyzer_properties, device_q, img_d, spectrums_d, results_d, kernel_finished);
-                    break;
-                }
-
-                case Analyzer_tools::Analyzer_algorithms::CCM: { 
-                    common_analysis<Functors::CCM>(analyzer_properties, device_q, img_d, spectrums_d, results_d, kernel_finished);
-                    break;
-                }
+            case Analyzer_tools::Analyzer_algorithms::EUCLIDEAN: { return common_analysis<Functors::Euclidean>(analyzer_properties, device_q, img_d, spectrums_d, results_d, kernel_finished); }                
+            case Analyzer_tools::Analyzer_algorithms::CCM: { return common_analysis<Functors::CCM>(analyzer_properties, device_q, img_d, spectrums_d, results_d, kernel_finished);}
+            
             default:
                 cerr << "Error: Algorithm not implemented" << endl;
                 return EXIT_FAILURE;
-                break;
         }
-
-        return EXIT_SUCCESS;
     }    
 }

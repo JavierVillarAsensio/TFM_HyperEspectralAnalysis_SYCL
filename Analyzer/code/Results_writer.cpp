@@ -43,29 +43,29 @@ int write_jpg(int *nearest_materials_image, size_t width, size_t height, string 
         150, 100, 50
     };
 
-    unsigned char* image = new unsigned char[width * height * channels];
+    unsigned char* coloured_image = new unsigned char[width * height * channels];
     int calculated_index;
     for (int i = 0; i < width * height; i++){
         calculated_index = (nearest_materials_image[i] * channels) % given_colours; //in case there are more materiales (performance test)
-        image[channels * i] = static_cast<unsigned char>(colors[calculated_index]);
-        image[(channels * i) + 1] = static_cast<unsigned char>(colors[calculated_index + 1]);
-        image[(channels * i) + 2] = static_cast<unsigned char>(colors[calculated_index + 2]);
+        coloured_image[channels * i] = static_cast<unsigned char>(colors[calculated_index]);
+        coloured_image[(channels * i) + 1] = static_cast<unsigned char>(colors[calculated_index + 1]);
+        coloured_image[(channels * i) + 2] = static_cast<unsigned char>(colors[calculated_index + 2]);
     }
 
     if(!filesystem::exists(OUTPUT_FOLDER))
         if(!filesystem::create_directory(OUTPUT_FOLDER)){
             cerr << "Error creating output folder. Aborting..." << endl;
-            delete[] image;
+            delete[] coloured_image;
             return EXIT_FAILURE;
         }
 
-    if (!stbi_write_jpg(results_file_name.c_str(), width, height, channels, image, JPG_MAX_QUALITY)) {
+    if (!stbi_write_jpg(results_file_name.c_str(), width, height, channels, coloured_image, JPG_MAX_QUALITY)) {
         cerr << "Error creating jpg. Aborting..." << endl;
-        delete[] image;
+        delete[] coloured_image;
         return EXIT_FAILURE;
     }
 
-    delete[] image;
+    delete[] coloured_image;
     return EXIT_SUCCESS;
 }
 

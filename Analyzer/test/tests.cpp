@@ -116,10 +116,18 @@ exit_code check_result_img(float* ptr) {
 template<typename T>
 exit_code check_scaled(T a) {
     float epsilon = 0.0001;
-    size_t full_line_bands = TEST_BANDS * TEST_SAMPLES;
+    size_t bil_index;
+    float temp;
 
     for(size_t i = 0; i < TEST_IMG_SIZE; i++) {
-        if(!(fabs(a[i] - TEST_SCALED_IMG[i]) < epsilon))
+        bil_index = ((i / (analyzer_properties.envi_properties.samples * analyzer_properties.envi_properties.bands)) * 
+                    (analyzer_properties.envi_properties.samples * analyzer_properties.envi_properties.bands)) + //line
+                    
+                    (i % analyzer_properties.envi_properties.samples) * analyzer_properties.envi_properties.bands + //sample
+                    
+                    (i / analyzer_properties.envi_properties.samples) % analyzer_properties.envi_properties.bands; //band
+
+        if(!(fabs(a[i] - TEST_SCALED_IMG[bil_index]) < epsilon))
             return EXIT_FAILURE;
     }
 
@@ -315,7 +323,7 @@ exit_code test_scale_img_USM() {
     size_t img_size = analyzer_properties.envi_properties.get_image_3Dsize();
     float* ptr_h = (float*)malloc(img_size * sizeof(float));
 
-    Analyzer_tools::scale_image(device_q, analyzer_properties, img_d, copied_event, true);
+    Analyzer_tools::scale_image(device_q, analyzer_properties, img_d, copied_event, false);
 
     Analyzer_tools::copy_from_device(false, device_q, ptr_h, img_d, img_size, &copied_event);
     copied_event.value().wait();
@@ -335,7 +343,7 @@ exit_code test_scale_img_acc() {
     size_t img_size = analyzer_properties.envi_properties.get_image_3Dsize();
     float* ptr_h = (float*)malloc(img_size * sizeof(float));
 
-    Analyzer_tools::scale_image(device_q, analyzer_properties, img_d_buff, copied_event, true);
+    Analyzer_tools::scale_image(device_q, analyzer_properties, img_d_buff, copied_event, false);
 
     Analyzer_tools::copy_from_device(true, device_q, ptr_h, img_d_buff, img_size, &copied_event);
     copied_event.value().wait();
@@ -375,6 +383,7 @@ void sycl_tests(int& tests_done, int& tests_passed) {
 exit_code test_basic_euclidean() {
     bool temp_ND = analyzer_properties.ND_kernel;
     analyzer_properties.ND_kernel = false;
+    exit_code return_value;
 
     size_t img_2Dsize = analyzer_properties.envi_properties.get_image_2Dsize();
     size_t results_size = Functors::Euclidean<float*>::get_results_size(analyzer_properties.envi_properties.lines, 
@@ -391,18 +400,28 @@ exit_code test_basic_euclidean() {
     copied_event.value().wait();
     Analyzer_tools::copy_to_device(false, device_q, results_d, final_results_h, results_size, &copied_event);
     
-    Analyzer_tools::launch_kernel<Functors::Euclidean>(device_q, copied_event, analyzer_properties, array{img_d, spectrums_d, results_d}, 
+    Event_opt kernel_finished;
+    return_value = Analyzer_tools::launch_kernel<Functors::Euclidean>(device_q, kernel_finished, copied_event, analyzer_properties, array{img_d, spectrums_d, results_d}, 
                                                        analyzer_properties.n_spectrums,
                                                        analyzer_properties.envi_properties.lines,
                                                        analyzer_properties.envi_properties.samples,
                                                        analyzer_properties.envi_properties.bands,
-                                                       analyzer_properties.coalescent_read_size).wait();
+                                                       analyzer_properties.coalescent_read_size);
+
+    if(kernel_finished.has_value()) 
+        kernel_finished.value().wait();
+    
+    if(return_value != EXIT_SUCCESS) {
+        sycl::free(get<float*>(results_d), device_q);
+        analyzer_properties.ND_kernel = temp_ND;
+        return return_value;
+    }
         
     float* result_img = (float*)malloc(img_2Dsize * sizeof(float));
-    Analyzer_tools::copy_from_device(false, device_q, final_results_h, results_d, img_2Dsize * 2, &copied_event);
+    Analyzer_tools::copy_from_device(false, device_q, final_results_h, results_d, img_2Dsize, &copied_event);
     copied_event.value().wait();
 
-    exit_code return_value = check_result_img(final_results_h);
+    return_value = check_result_img(final_results_h);
     
     sycl::free(get<float*>(results_d), device_q);
     free(result_img);
@@ -414,6 +433,7 @@ exit_code test_basic_euclidean() {
 exit_code test_ND_euclidean() {
     size_t temp_local_mem = analyzer_properties.device_local_memory;
     analyzer_properties.device_local_memory = 0;
+    exit_code return_value;
     size_t results_size = Functors::Euclidean<float*>::get_results_size(analyzer_properties.envi_properties.lines, 
                                                                                analyzer_properties.envi_properties.samples, 
                                                                                analyzer_properties.envi_properties.bands, 
@@ -427,17 +447,28 @@ exit_code test_ND_euclidean() {
 
     Analyzer_tools::copy_to_device(false, device_q, results_d, results_h, results_size, &copied_event);
     
-    Analyzer_tools::launch_kernel<Functors::Euclidean>(device_q, copied_event, analyzer_properties, array{img_d, spectrums_d, results_d}, 
+    Event_opt kernel_finished;
+    return_value = Analyzer_tools::launch_kernel<Functors::Euclidean>(device_q, kernel_finished, copied_event, analyzer_properties, array{img_d, spectrums_d, results_d}, 
                                                        analyzer_properties.n_spectrums,
                                                        analyzer_properties.envi_properties.lines,
                                                        analyzer_properties.envi_properties.samples,
                                                        analyzer_properties.envi_properties.bands,
-                                                       analyzer_properties.coalescent_read_size).wait();
+                                                       analyzer_properties.coalescent_read_size);
+
+    if(kernel_finished.has_value()) 
+        kernel_finished.value().wait();
+
+    if(return_value != EXIT_SUCCESS) {
+        sycl::free(get<float*>(results_d), device_q);
+        free(results_h);
+        analyzer_properties.device_local_memory = temp_local_mem;
+        return return_value;
+    }
 
     Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, results_size, &copied_event);
     copied_event.value().wait();
 
-    exit_code return_value = check_result_img(results_h);
+    return_value = check_result_img(results_h);
     
     sycl::free(get<float*>(results_d), device_q);
     free(results_h);
@@ -447,6 +478,7 @@ exit_code test_ND_euclidean() {
 }
 
 exit_code test_ND_localMem_euclidean() {
+    exit_code return_value;
     size_t results_size = Functors::Euclidean<float*>::get_results_size(analyzer_properties.envi_properties.lines, 
                                                                                analyzer_properties.envi_properties.samples, 
                                                                                analyzer_properties.envi_properties.bands, 
@@ -460,17 +492,27 @@ exit_code test_ND_localMem_euclidean() {
 
     Analyzer_tools::copy_to_device(false, device_q, results_d, results_h, results_size, &copied_event);
     
-    Analyzer_tools::launch_kernel<Functors::Euclidean>(device_q, copied_event, analyzer_properties, array{img_d, spectrums_d, results_d}, 
+    Event_opt kernel_finished;
+    return_value = Analyzer_tools::launch_kernel<Functors::Euclidean>(device_q, kernel_finished, copied_event, analyzer_properties, array{img_d, spectrums_d, results_d}, 
                                                        analyzer_properties.n_spectrums,
                                                        analyzer_properties.envi_properties.lines,
                                                        analyzer_properties.envi_properties.samples,
                                                        analyzer_properties.envi_properties.bands,
-                                                       analyzer_properties.coalescent_read_size).wait_and_throw();
+                                                       analyzer_properties.coalescent_read_size);
+
+    if(kernel_finished.has_value()) 
+        kernel_finished.value().wait();
+    
+    if(return_value != EXIT_SUCCESS) {
+        sycl::free(get<float*>(results_d), device_q);
+        free(results_h);
+        return return_value;
+    }
 
     Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, results_size, &copied_event);
     copied_event.value().wait();
 
-    exit_code return_value = check_result_img(results_h);
+    return_value = check_result_img(results_h);
     sycl::free(get<float*>(results_d), device_q);
     free(results_h);
 
@@ -481,6 +523,7 @@ exit_code test_ND_localMem_euclidean() {
 exit_code test_basic_CCM() {
     bool temp_ND = analyzer_properties_CCM.ND_kernel;
     analyzer_properties_CCM.ND_kernel = false;
+    exit_code return_value;
 
     using Static_f = Functors::CCM<float*>;
 
@@ -497,17 +540,28 @@ exit_code test_basic_CCM() {
 
     Analyzer_tools::copy_to_device(false, device_q, results_d, results_h, results_size, &copied_event);
 
-    Analyzer_tools::launch_kernel<Functors::CCM>(device_q, copied_event, analyzer_properties_CCM, array{img_d_CCM, spectrums_d_CCM, results_d}, 
+    Event_opt kernel_finished;
+    return_value = Analyzer_tools::launch_kernel<Functors::CCM>(device_q, kernel_finished, copied_event, analyzer_properties_CCM, array{img_d_CCM, spectrums_d_CCM, results_d}, 
                                                        analyzer_properties_CCM.n_spectrums,
                                                        analyzer_properties_CCM.envi_properties.lines,
                                                        analyzer_properties_CCM.envi_properties.samples,
                                                        analyzer_properties_CCM.envi_properties.bands,
-                                                       analyzer_properties_CCM.coalescent_read_size).wait();
+                                                       analyzer_properties_CCM.coalescent_read_size);
+
+    if(kernel_finished.has_value())
+        kernel_finished.value().wait();
+    
+    if(return_value != EXIT_SUCCESS) {
+        sycl::free(get<float*>(results_d), device_q);
+        free(results_h);
+        analyzer_properties_CCM.ND_kernel = temp_ND;
+        return return_value;
+    }
 
     Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, results_size, &copied_event);
     copied_event.value().wait();
 
-    exit_code return_value = CCM_CORRECT(results_h);
+    return_value = CCM_CORRECT(results_h);
 
     sycl::free(get<float*>(results_d), device_q);
     free(results_h);
@@ -519,6 +573,7 @@ exit_code test_basic_CCM() {
 exit_code test_ND_CCM() {
     size_t temp_local_mem = analyzer_properties_CCM.device_local_memory;
     analyzer_properties_CCM.device_local_memory = 0;
+    exit_code return_value;
     
     using Static_f = Functors::CCM<float*>;
 
@@ -533,17 +588,28 @@ exit_code test_ND_CCM() {
 
     Analyzer_variant results_d = sycl::malloc_device<float>(results_size, device_q);
 
-    Analyzer_tools::launch_kernel<Functors::CCM>(device_q, copied_event, analyzer_properties_CCM, array{img_d_CCM, spectrums_d_CCM, results_d}, 
+    Event_opt kernel_finished;
+    return_value = Analyzer_tools::launch_kernel<Functors::CCM>(device_q, kernel_finished, copied_event, analyzer_properties_CCM, array{img_d_CCM, spectrums_d_CCM, results_d}, 
                                                        analyzer_properties_CCM.n_spectrums,
                                                        analyzer_properties_CCM.envi_properties.lines,
                                                        analyzer_properties_CCM.envi_properties.samples,
                                                        analyzer_properties_CCM.envi_properties.bands,
-                                                       analyzer_properties_CCM.coalescent_read_size).wait();
+                                                       analyzer_properties_CCM.coalescent_read_size);
+
+    if(kernel_finished.has_value())
+        kernel_finished.value().wait();
+    
+    if(return_value != EXIT_SUCCESS) {
+        sycl::free(get<float*>(results_d), device_q);
+        free(results_h);
+        analyzer_properties_CCM.device_local_memory = temp_local_mem;
+        return return_value;
+    }
 
     Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, results_size, &copied_event);
     copied_event.value().wait();
 
-    exit_code return_value = CCM_CORRECT(results_h);
+    return_value = CCM_CORRECT(results_h);
     
     sycl::free(get<float*>(results_d), device_q);
     free(results_h);
@@ -554,6 +620,7 @@ exit_code test_ND_CCM() {
 
 exit_code test_ND_localMem_CCM() {
     using Static_f = Functors::CCM<float*>;
+    exit_code return_value;
 
     size_t results_size = Static_f::get_results_size(analyzer_properties_CCM.envi_properties.lines, 
                                                           analyzer_properties_CCM.envi_properties.samples, 
@@ -566,22 +633,30 @@ exit_code test_ND_localMem_CCM() {
 
     Analyzer_variant results_d = sycl::malloc_device<float>(results_size, device_q);
 
-    Analyzer_tools::launch_kernel<Functors::CCM>(device_q, copied_event, analyzer_properties_CCM, array{img_d_CCM, spectrums_d_CCM, results_d}, 
+    Event_opt kernel_finished;
+    return_value = Analyzer_tools::launch_kernel<Functors::CCM>(device_q, kernel_finished, copied_event, analyzer_properties_CCM, array{img_d_CCM, spectrums_d_CCM, results_d}, 
                                                        analyzer_properties_CCM.n_spectrums,
                                                        analyzer_properties_CCM.envi_properties.lines,
                                                        analyzer_properties_CCM.envi_properties.samples,
                                                        analyzer_properties_CCM.envi_properties.bands,
-                                                       analyzer_properties_CCM.coalescent_read_size).wait();
+                                                       analyzer_properties_CCM.coalescent_read_size);
+
+
+    if(kernel_finished.has_value())
+        kernel_finished.value().wait();
+
+        
+
+    if(return_value != EXIT_SUCCESS) {
+        sycl::free(get<float*>(results_d), device_q);
+        free(results_h);
+        return return_value;
+    }
 
     Analyzer_tools::copy_from_device(false, device_q, results_h, results_d, results_size, &copied_event);
     copied_event.value().wait();
 
-    cout << "Results: ";
-    for(int i = 0; i < 2; i++)
-        cout << results_h[i] << " ";
-    cout << endl;
-
-    exit_code return_value = CCM_CORRECT(results_h);
+    return_value = CCM_CORRECT(results_h);
     
     sycl::free(get<float*>(results_d), device_q);
     free(results_h);
@@ -590,9 +665,9 @@ exit_code test_ND_localMem_CCM() {
 }
 
 void kernel_tests(int& tests_done, int& tests_passed) {
-    //test(test_basic_euclidean, "basic euclidean kernel", tests_passed, tests_done);
-    //test(test_ND_euclidean, "ND euclidean kernel", tests_passed, tests_done);
-    //test(test_ND_localMem_euclidean, "ND with local memory euclidean kernel", tests_passed, tests_done);
+    test(test_basic_euclidean, "basic euclidean kernel", tests_passed, tests_done);
+    test(test_ND_euclidean, "ND euclidean kernel", tests_passed, tests_done);
+    test(test_ND_localMem_euclidean, "ND with local memory euclidean kernel", tests_passed, tests_done);
     free_resources(img_h, spectrums_h, img_d, spectrums_d);
     
     initialize_CCM();
@@ -640,7 +715,7 @@ int main(int argc, char **argv){
     spectrums_tests(tests_done, tests_passed);
     sycl_tests(tests_done, tests_passed);
     kernel_tests(tests_done, tests_passed);
-    //results_tests(tests_done, tests_passed);
+    results_tests(tests_done, tests_passed);
 
     if (tests_passed != tests_done)
         cout << "\033[31mThe number of tests passed is lower than the tests done: \033[0m" << "Tests passed: " << tests_passed << " < " "Tests done: " << tests_done << endl;
