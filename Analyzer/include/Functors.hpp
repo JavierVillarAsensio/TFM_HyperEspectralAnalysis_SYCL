@@ -295,96 +295,98 @@ namespace Functors {
         void operator()(sycl::id<1> id) const {
             size_t wi_id = id.get(0);
 
-            size_t img_offset = (wi_id / this->n_spectrums) * this->bands_size;
+            size_t img_offset = (wi_id / this->n_cols) * (this->bands_size * this->n_cols) + (wi_id % this->n_cols);
+            size_t spectrum_offset = 0;
 
-            size_t spectrum_offset = (wi_id % this->n_spectrums) * this->bands_size;
-
-            float sum_pixel_values = 0, sum_reference_values = 0;
-            float sum_sqrd_pixel_values = 0, sum_sqrd_reference_values = 0;
-            float sum_pixel_by_reference_values = 0;
+            float sum_pixel_values, sum_reference_values;
+            float sum_sqrd_pixel_values, sum_sqrd_reference_values;
+            float sum_pixel_by_reference_values;
 
             float pixel_value, spectrum_value;
+            float highest_correlation = -1.1f; //the lowest correlation is -1 so every correlation will be higher
+            size_t best_spectrum_index = this->n_spectrums; //incorrect value
 
-            for(size_t i = 0; i < this->bands_size; i++) {
-                pixel_value = this->img_d[img_offset + i];
-                spectrum_value = this->spectrums_d[spectrum_offset + i];
+            for(size_t spectrum = 0; spectrum < this->n_spectrums; spectrum++) {
 
-                sum_pixel_values += pixel_value;
-                sum_reference_values += spectrum_value;
+                sum_pixel_values = 0;
+                sum_reference_values = 0;
+                sum_sqrd_pixel_values = 0;
+                sum_sqrd_reference_values = 0;
+                sum_pixel_by_reference_values = 0;
 
-                sum_sqrd_pixel_values += pixel_value * pixel_value;
-                sum_sqrd_reference_values += spectrum_value * spectrum_value;
+                for(size_t i = 0; i < this->bands_size; i++) {
+                    pixel_value = this->img_d[img_offset + (i * this->bands_size)];
+                    spectrum_value = this->spectrums_d[spectrum_offset++];
 
-                sum_pixel_by_reference_values += pixel_value * spectrum_value;
-            }
+                    sum_pixel_values += pixel_value;
+                    sum_reference_values += spectrum_value;
 
-            //Pearson correlation coefficient formula
-            float numerator = this->bands_size * sum_pixel_by_reference_values - sum_pixel_values * sum_reference_values;
-            float denominator = sycl::sqrt((this->bands_size * sum_sqrd_pixel_values - sum_pixel_values * sum_pixel_values) * (this->bands_size * sum_sqrd_reference_values - sum_reference_values * sum_reference_values));
+                    sum_sqrd_pixel_values += pixel_value * pixel_value;
+                    sum_sqrd_reference_values += spectrum_value * spectrum_value;
 
-            float correlation = numerator / denominator;
-            
-            size_t img_2D_size = this->n_lines * this->n_cols;
-            size_t pixel_offset = wi_id / this->n_spectrums;
-            
-            //                                                                                                                                                          where the highest value is stored
-            sycl::atomic_ref<float, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> highest_coefficient(this->results_d[img_2D_size + pixel_offset]);
-            float read_coefficient = highest_coefficient.load();
-            while(correlation > read_coefficient) {
-                if(highest_coefficient.compare_exchange_weak(read_coefficient, correlation, sycl::memory_order::relaxed)) {   //compare only if "read_coefficient" remains as the stored value, if so, change it
-                    sycl::atomic_ref<float, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> nearest_spectrum(this->results_d[pixel_offset]);
-                    nearest_spectrum.store(spectrum_offset / this->bands_size);
-                    break;
+                    sum_pixel_by_reference_values += pixel_value * spectrum_value;
                 }
-                read_coefficient = highest_coefficient.load();
+
+                //Pearson correlation coefficient formula
+                float numerator = this->bands_size * sum_pixel_by_reference_values - sum_pixel_values * sum_reference_values;
+                float denominator = sycl::sqrt((this->bands_size * sum_sqrd_pixel_values - sum_pixel_values * sum_pixel_values) * (this->bands_size * sum_sqrd_reference_values - sum_reference_values * sum_reference_values));
+
+                if((numerator / denominator) > highest_correlation) {
+                    highest_correlation = (numerator / denominator);
+                    best_spectrum_index = spectrum;
+                }
             }
+            
+            this->results_d[wi_id] = best_spectrum_index;
         }
 
         //kernel for ND without local mem
         void operator()(sycl::nd_item<1> id) const {
-            size_t group_id = id.get_group_linear_id();
-            size_t local_id = id.get_local_linear_id();
+            size_t wi_id = id.get_global_linear_id();
 
-            //bil img offset              line                          line size                     group sample
-            size_t img_offset = group_id * this->bands_size;
-            size_t spectrum_offset = local_id * this->bands_size;
+            size_t img_offset = (wi_id / this->n_cols) * (this->bands_size * this->n_cols) + (wi_id % this->n_cols);
+            size_t spectrum_offset = 0;
 
-            float sum_pixel_values = 0, sum_reference_values = 0;
-            float sum_sqrd_pixel_values = 0, sum_sqrd_reference_values = 0;
-            float sum_pixel_by_reference_values = 0;
+            float sum_pixel_values, sum_reference_values;
+            float sum_sqrd_pixel_values, sum_sqrd_reference_values;
+            float sum_pixel_by_reference_values;
 
             float pixel_value, spectrum_value;
+            float highest_correlation = -1.1f; //the lowest correlation is -1 so every correlation will be higher
+            size_t best_spectrum_index = this->n_spectrums; //incorrect value
 
-            for(size_t i = 0; i < this->bands_size; i++) {
-                pixel_value = this->img_d[img_offset + i];
-                spectrum_value = this->spectrums_d[spectrum_offset + i];
+            for(size_t spectrum = 0; spectrum < this->n_spectrums; spectrum++) {
 
-                sum_pixel_values += pixel_value;
-                sum_reference_values += spectrum_value;
+                sum_pixel_values = 0;
+                sum_reference_values = 0;
+                sum_sqrd_pixel_values = 0;
+                sum_sqrd_reference_values = 0;
+                sum_pixel_by_reference_values = 0;
 
-                sum_sqrd_pixel_values += pixel_value * pixel_value;
-                sum_sqrd_reference_values += spectrum_value * spectrum_value;
+                for(size_t i = 0; i < this->bands_size; i++) {
+                    pixel_value = this->img_d[img_offset + (i * this->bands_size)];
+                    spectrum_value = this->spectrums_d[spectrum_offset++];
 
-                sum_pixel_by_reference_values += pixel_value * spectrum_value;
+                    sum_pixel_values += pixel_value;
+                    sum_reference_values += spectrum_value;
+
+                    sum_sqrd_pixel_values += pixel_value * pixel_value;
+                    sum_sqrd_reference_values += spectrum_value * spectrum_value;
+
+                    sum_pixel_by_reference_values += pixel_value * spectrum_value;
+                }
+
+                //Pearson correlation coefficient formula
+                float numerator = this->bands_size * sum_pixel_by_reference_values - sum_pixel_values * sum_reference_values;
+                float denominator = sycl::sqrt((this->bands_size * sum_sqrd_pixel_values - sum_pixel_values * sum_pixel_values) * (this->bands_size * sum_sqrd_reference_values - sum_reference_values * sum_reference_values));
+
+                if((numerator / denominator) > highest_correlation) {
+                    highest_correlation = (numerator / denominator);
+                    best_spectrum_index = spectrum;
+                }
             }
-
-            //Pearson correlation coefficient formula
-            float numerator = this->bands_size * sum_pixel_by_reference_values - sum_pixel_values * sum_reference_values;
-            float denominator = sycl::sqrt((this->bands_size * sum_sqrd_pixel_values - sum_pixel_values * sum_pixel_values) * (this->bands_size * sum_sqrd_reference_values - sum_reference_values * sum_reference_values));
-
-            float correlation = numerator / denominator;
             
-            //                                                                                                                                                  where the highest value is stored
-            sycl::atomic_ref<float, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> highest_coefficient(this->results_d[group_id]);
-            float read_coefficient = highest_coefficient.load();
-            while(correlation > read_coefficient)
-                highest_coefficient.compare_exchange_weak(read_coefficient, correlation, sycl::memory_order::relaxed);
-
-            id.barrier();   //the lowest value is already in the results
-            
-            read_coefficient = this->results_d[group_id];
-            if(std::fabs(correlation - read_coefficient) < 0.00001f)   //tolerance for float comparison
-                highest_coefficient.store(local_id);    //store the index of the nearest spectrum*/
+            this->results_d[wi_id] = best_spectrum_index;
         }
 
         //kernel for ND with local mem

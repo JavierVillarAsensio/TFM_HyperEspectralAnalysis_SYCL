@@ -673,8 +673,8 @@ void kernel_tests(int& tests_done, int& tests_passed) {
     initialize_CCM();
     Analyzer_tools::copy_to_device(false, device_q, spectrums_d_CCM, spectrums_h_CCM, CCM_EXAMPLE_SIZE, &copied_event);
     Analyzer_tools::copy_to_device(false, device_q, img_d_CCM, img_h_CCM, CCM_EXAMPLE_SIZE, &copied_event);
-    //test(test_basic_CCM, "basic CCM kernel", tests_passed, tests_done);
-    //test(test_ND_CCM, "ND CCM kernel", tests_passed, tests_done);
+    test(test_basic_CCM, "basic CCM kernel", tests_passed, tests_done);
+    test(test_ND_CCM, "ND CCM kernel", tests_passed, tests_done);
     test(test_ND_localMem_CCM, "ND with local memory CCM kernel", tests_passed, tests_done);
     free_resources(img_h_CCM, spectrums_h_CCM, img_d_CCM, spectrums_d_CCM);
 }
