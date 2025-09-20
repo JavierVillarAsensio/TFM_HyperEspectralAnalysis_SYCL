@@ -56,13 +56,7 @@ exit_code common_analysis(Analyzer_tools::Analyzer_properties& analyzer_properti
     Event_opt copied_event;
     Analyzer_tools::copy_to_device(analyzer_properties.USE_ACCESSORS, device_q, results_d, final_results_h, results_size, &copied_event);
 
-    Event_opt results_initialized;
-    return_value = Analyzer_tools::launch_kernel<Functors::ResultsInitilizer>(device_q, copied_event, results_initialized, analyzer_properties, array{results_d}, Static_f::results_initial_value());
-
-    if(return_value != EXIT_SUCCESS)
-        return return_value;
-
-    return_value = Analyzer_tools::launch_kernel<Functor>(device_q, kernel_finished, results_initialized, analyzer_properties, array{img_d, spectrums_d, results_d}, 
+    return_value = Analyzer_tools::launch_kernel<Functor>(device_q, kernel_finished, copied_event, analyzer_properties, array{img_d, spectrums_d, results_d}, 
                                                                          analyzer_properties.n_spectrums,
                                                                          analyzer_properties.envi_properties.lines,
                                                                          analyzer_properties.envi_properties.samples,
@@ -387,7 +381,10 @@ namespace Analyzer_tools {
                 img_d = img_reordered;
             }
             else
-                ret = Analyzer_tools::launch_kernel<Functors::ImgScaler>(device_q, img_scaled, img_scaled, analyzer_properties, array{img_d}, analyzer_properties.envi_properties.reflectance_scale_factor/PERCENTAGE_FACTOR);
+                ret = Analyzer_tools::launch_kernel<Functors::ImgScaler>(device_q, img_scaled, img_scaled, analyzer_properties, array{img_d}, 
+                                                                         analyzer_properties.envi_properties.reflectance_scale_factor/PERCENTAGE_FACTOR,
+                                                                         analyzer_properties.envi_properties.samples,
+                                                                         analyzer_properties.envi_properties.bands);
         } catch (const sycl::exception &e) {
             std::cerr << "Error when launching SYCL kernel to scale image, error message: " << e.what() << std::endl;
             return EXIT_FAILURE;

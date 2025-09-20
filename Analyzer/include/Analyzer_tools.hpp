@@ -113,6 +113,7 @@ namespace Analyzer_tools {
                     
                     if constexpr (std::is_same_v<Range_type, sycl::nd_range<1>> && Static_f::has_ND() && Static_f::uses_local_mem()) { 
                         if(HAS_LOCAL_MEM(p)) {  //nd with local mem
+                            std::cout << "Range: " << range.get_global_range()[0] << ", " << range.get_local_range()[0] << std::endl;
                             size_t local_range_size = range.get_local_range()[0];
                             size_t local_mem_size = Static_f::get_local_mem_size(p.envi_properties.lines, p.envi_properties.samples, p.envi_properties.bands, p.n_spectrums, local_range_size);
                             sycl::local_accessor<float, 1> local_mem(local_mem_size, h);
@@ -153,8 +154,18 @@ namespace Analyzer_tools {
             using Static_f = Functor<float*>;
             Range_variant var_range;
         
-            size_t global_size = Static_f::get_range_global_size(p.envi_properties.lines, p.envi_properties.samples, p.envi_properties.bands, p.n_spectrums, HAS_LOCAL_MEM(p));
-            size_t local_size = Static_f::get_range_local_size(p.envi_properties.lines, p.envi_properties.samples, p.envi_properties.bands, p.n_spectrums, p.ND_max_item_work_group_size, p.device_local_memory);
+            size_t global_size = Static_f::get_range_global_size(p.envi_properties.lines, 
+                                                                 p.envi_properties.samples, 
+                                                                 p.envi_properties.bands, 
+                                                                 p.n_spectrums, 
+                                                                 HAS_LOCAL_MEM(p));
+            size_t local_size = Static_f::get_range_local_size(p.envi_properties.lines, 
+                                                               p.envi_properties.samples, 
+                                                               p.envi_properties.bands, 
+                                                               p.n_spectrums, 
+                                                               p.ND_max_item_work_group_size, 
+                                                               p.device_local_memory,
+                                                               global_size);
 
             var_range = p.ND_kernel && p.ND_max_item_work_group_size >= local_size && Static_f::has_ND() && local_size > 1
                 ? var_range = sycl::nd_range<1> {sycl::range<1> {global_size}, sycl::range<1> {local_size}} 

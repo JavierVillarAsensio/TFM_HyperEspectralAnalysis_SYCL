@@ -23,8 +23,10 @@ inline float compute_correlation(
 
         #pragma unroll 10
         for (size_t i = 0; i < bands_size; i++) {
-            float pixel_value = local_mem[pixel_base_idx + i * local_range];
-            float spectrum_value = spectrums_d[spectrum_idx * bands_size + i];
+            uint16_t spectrum_it_idx = spectrum_idx * bands_size + i;
+            uint16_t img_it_idx = pixel_base_idx + i * local_range;
+            float pixel_value = local_mem[img_it_idx];
+            float spectrum_value = spectrums_d[spectrum_it_idx];
 
             sum_pixel_values += pixel_value;
             sum_reference_values += spectrum_value;
@@ -72,28 +74,21 @@ namespace Functors {
         BaseFunctor() = default;
 
         static inline constexpr size_t get_n_access_points() { return 3; }
-        static inline const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return lines * cols; }
-        static inline const size_t get_range_local_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, size_t max_ND_size, size_t max_local_mem_size) { 
-            size_t spectra_local_mem_needed = (n_spectrums * bands) * sizeof(float);
-            
+        static inline const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return cols * lines; }
+        static inline const size_t get_range_local_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, size_t max_ND_size, size_t max_local_mem_size, size_t global_size) {           
             size_t local_size = 1;
-            size_t global_size = lines * cols;
 
-            if(max_local_mem_size > 1)
-                for(size_t i = 2; i < max_ND_size; i++) {
-                    if(((spectra_local_mem_needed + (i * bands * sizeof(float))) > max_local_mem_size) || i > global_size)
-                        break;
-                    
-                    if(global_size % i == 0)
-                        local_size = i;
+            for(size_t i = max_ND_size; i > 1; i--) {                    
+                if(global_size % i == 0) {
+                    local_size = i;
+                    break;
                 }
-            else
-                local_size = max_ND_size < global_size ? max_ND_size : global_size;
+            }
 
             return local_size; 
         }
         static inline const size_t get_results_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool nd) { return lines * cols; }
-        static inline const size_t get_local_mem_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, size_t local_range) { return (local_range * bands) + (n_spectrums * bands); }
+        static inline const size_t get_local_mem_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, size_t local_range) { return n_spectrums * bands; }
         static inline constexpr bool has_ND() { return true; }
         static inline constexpr bool uses_local_mem() { return true; }
         static inline constexpr float results_initial_value() { return 0.f; }
@@ -122,18 +117,33 @@ namespace Functors {
     struct ImgScaler : BaseFunctor<Data_access>{
         Data_access img_d;
         int scale_factor;
+        size_t n_cols;
+        size_t bands_size;
 
-        ImgScaler(Data_access img_in, int reflectance_scale_factor) : scale_factor(reflectance_scale_factor), img_d(img_in) {}
+        ImgScaler(Data_access img_in, int reflectance_scale_factor, size_t n_cols_in, size_t bands_size_in) 
+            : scale_factor(reflectance_scale_factor), img_d(img_in), n_cols(n_cols_in), bands_size(bands_size_in) {}
 
         inline static constexpr size_t get_n_access_points() { return 1; }
-        inline static const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return lines * cols * bands;}
+        static inline const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return cols * lines; }
         static inline constexpr bool uses_local_mem() { return false; }
 
         //kernel for basic
-        void operator()(sycl::id<1> i) const { img_d[i] /= scale_factor; } 
+       void operator()(sycl::id<1> i) const { 
+            size_t img_offset = i * bands_size;
+                #pragma unroll 10
+                for(size_t b = 0; b < bands_size; b++)
+                    img_d[img_offset++] /= scale_factor; 
+        }
 
         //kernel for nd without local mem
-        void operator()(sycl::nd_item<1> i) const { img_d[i.get_global_linear_id()] /= scale_factor; } 
+        void operator()(sycl::nd_item<1> i) const { 
+            size_t gl_id = i.get_global_linear_id();
+            size_t img_offset = ((gl_id / n_cols) * (bands_size * n_cols)) + (gl_id % n_cols);
+
+            #pragma unroll 10
+            for(size_t b = 0; b < bands_size; b++)        
+                img_d[img_offset + (b * n_cols)] /= scale_factor; 
+        }
     };  
     
     template<typename Data_access>
@@ -279,6 +289,7 @@ namespace Functors {
 
     template<typename Data_access>
     struct CCM : BaseFunctor<Data_access>{  
+        static const size_t pixels_per_thread = 30; //to reduce the impact of memory latency
         CCM(Data_access img_in, 
             Data_access spectrums_in, 
             Data_access results_in, 
@@ -290,6 +301,7 @@ namespace Functors {
             : BaseFunctor<Data_access>(img_in, spectrums_in, results_in, n_spectrums_in, n_lines_in, n_cols_in, bands_size_in, coalesced_memory_width_in) {}
 
         static inline constexpr float results_initial_value() { return -1.1f; }
+        static inline const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return cols * lines /  pixels_per_thread; }
 
         //kernel for basic
         void operator()(sycl::id<1> id) const {
@@ -395,38 +407,109 @@ namespace Functors {
             size_t local_id = id.get_local_linear_id();
             size_t local_range = id.get_local_range()[0];
 
-            size_t global_img_index_start = (((group_id * local_range + local_id) / this->n_cols) * (this->n_cols * this->bands_size)) + ((group_id * local_range) % this->n_cols) + (local_id % this->n_cols);
-            size_t global_img_index_end = global_img_index_start + (this->n_cols * this->bands_size);
-
-            //copy img to local memory coalesced
+            //copy specs to local memory coalesced
             size_t local_stride = local_id;
-            for(size_t copy_img = global_img_index_start; copy_img < global_img_index_end; copy_img += this->n_cols) {
-                local_mem[local_stride] = this->img_d[copy_img];
+            for(size_t copy_specs = local_id; copy_specs < (this->n_spectrums * this->bands_size); copy_specs += local_range) {
+                local_mem[local_stride] = this->spectrums_d[copy_specs];
                 local_stride += local_range;
             }
 
-            float highest_correlation = -1.1f; //the lowest correlation is -1 so every correlation will be higher
-            float best_spectrum_index = this->n_spectrums; //incorrect value
-
             id.barrier(); //wait until the local memory copy is finished
+         
+            for(size_t p = 0; p < this->pixels_per_thread; p++){
+                size_t pixel_offset_2D = (group_id * local_range * pixels_per_thread) + (local_range * p) + local_id;
+                size_t img_offset = pixel_offset_2D / this->n_cols * (this->n_cols * this->bands_size) + pixel_offset_2D % this->n_cols;
 
-            for(size_t spectrum = 0; spectrum < this->n_spectrums; spectrum++) {
+                float highest_correlation = -1.1f; //the lowest correlation is -1 so every correlation will be higher
+                float best_spectrum_index = this->n_spectrums; //incorrect value
 
-                float correlation = compute_correlation(
-                    local_id,
-                    spectrum,
-                    local_range,
-                    local_mem,
-                    this->spectrums_d,
-                    this->bands_size
-                );
+                size_t spectrum_index = 0;
+                if(img_offset >= (this->n_lines * this->n_cols * this->bands_size))
+                    break;
 
-                if(correlation > highest_correlation) {
-                    highest_correlation = correlation;
-                    best_spectrum_index = spectrum;
+                for(size_t spectrum = 0; spectrum < this->n_spectrums; spectrum++) {
+                    float sum_pixel_values = 0.0f;
+                    float sum_reference_values = 0.0f;
+                    float sum_sqrd_pixel_values = 0.0f;
+                    float sum_sqrd_reference_values = 0.0f;
+                    float sum_pixel_by_reference_values = 0.0f;
+
+                    #pragma unroll 10
+                    for (size_t i = 0; i < this->bands_size; i++) {
+                        float pixel_value = this->img_d[img_offset + (i * this->n_cols)];
+                        float spectrum_value = local_mem[spectrum_index++];
+
+                        sum_pixel_values += pixel_value;
+                        sum_reference_values += spectrum_value;
+
+                        sum_sqrd_pixel_values += pixel_value * pixel_value;
+                        sum_sqrd_reference_values += spectrum_value * spectrum_value;
+
+                        sum_pixel_by_reference_values += pixel_value * spectrum_value;
+                    }
+
+                    float numerator = this->bands_size * sum_pixel_by_reference_values - sum_pixel_values * sum_reference_values;
+                    float denominator = sycl::sqrt(
+                        (this->bands_size * sum_sqrd_pixel_values - sum_pixel_values * sum_pixel_values) *
+                        (this->bands_size * sum_sqrd_reference_values - sum_reference_values * sum_reference_values)
+                    );
+                    float correlation = numerator / denominator;
+
+                    if(correlation > highest_correlation) {
+                        highest_correlation = correlation;
+                        best_spectrum_index = spectrum;
+                    }
+                } 
+                this->results_d[pixel_offset_2D] = best_spectrum_index;
+            }
+
+            if(group_id == id.get_group_range()[0] - 1){ //last work-group
+                size_t pixel_offset_2D_last_pixels = ((group_id + 1) * local_range * pixels_per_thread) + local_id;
+                size_t last_pixel_index = this->n_lines * this->n_cols;
+                if(pixel_offset_2D_last_pixels < last_pixel_index) {
+                    size_t img_offset = (pixel_offset_2D_last_pixels / this->n_cols) * (this->n_cols * this->bands_size) + (pixel_offset_2D_last_pixels % this->n_cols);
+
+                    float highest_correlation = -1.1f; //the lowest correlation is -1 so every correlation will be higher
+                    float best_spectrum_index = this->n_spectrums; //incorrect value
+
+                    size_t spectrum_index = 0;
+
+                    for(size_t spectrum = 0; spectrum < this->n_spectrums; spectrum++) {
+                        float sum_pixel_values = 0.0f;
+                        float sum_reference_values = 0.0f;
+                        float sum_sqrd_pixel_values = 0.0f;
+                        float sum_sqrd_reference_values = 0.0f;
+                        float sum_pixel_by_reference_values = 0.0f;
+
+                        #pragma unroll 10
+                        for (size_t i = 0; i < this->bands_size; i++) {
+                            float pixel_value = this->img_d[img_offset + (i * this->n_cols)];
+                            float spectrum_value = local_mem[spectrum_index++];
+
+                            sum_pixel_values += pixel_value;
+                            sum_reference_values += spectrum_value;
+
+                            sum_sqrd_pixel_values += pixel_value * pixel_value;
+                            sum_sqrd_reference_values += spectrum_value * spectrum_value;
+
+                            sum_pixel_by_reference_values += pixel_value * spectrum_value;
+                        }
+
+                        float numerator = this->bands_size * sum_pixel_by_reference_values - sum_pixel_values * sum_reference_values;
+                        float denominator = sycl::sqrt(
+                            (this->bands_size * sum_sqrd_pixel_values - sum_pixel_values * sum_pixel_values) *
+                            (this->bands_size * sum_sqrd_reference_values - sum_reference_values * sum_reference_values)
+                        );
+                        float correlation = numerator / denominator;
+
+                        if(correlation > highest_correlation) {
+                            highest_correlation = correlation;
+                            best_spectrum_index = spectrum;
+                        }
+                    } 
+                    this->results_d[pixel_offset_2D_last_pixels] = best_spectrum_index;
                 }
-            } 
-            this->results_d[group_id * local_range + local_id] = best_spectrum_index;
+            }
         }
     };
 };
