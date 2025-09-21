@@ -7,8 +7,6 @@
 #include <fstream>
 #include <Analyzer_tools.hpp>
 
-constexpr bool JR = true;
-
 #define JPG_MAX_QUALITY 100
 #define LEGEND_FILE_EXTENSION "_legend.txt"
 #define JPG_FILE_EXTENSION ".jpg"

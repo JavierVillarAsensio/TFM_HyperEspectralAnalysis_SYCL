@@ -51,7 +51,7 @@ namespace Functors {
     struct BaseFunctor {
         Data_access img_d, spectrums_d, results_d;
         size_t n_spectrums, n_lines, n_cols, bands_size;
-        size_t coalesced_memory_width = 1;
+        size_t coalesced_memory_width = 1, reflectance_scale_factor;
 
         BaseFunctor(Data_access img_in, 
                     Data_access spectrums_in,
@@ -60,7 +60,8 @@ namespace Functors {
                     size_t n_lines_in, 
                     size_t n_cols_in, 
                     size_t bands_size_in, 
-                    size_t coalesced_memory_width_in)
+                    size_t coalesced_memory_width_in,
+                    size_t reflectance_scale_factor_in)
                             : 
                     img_d(img_in),
                     spectrums_d(spectrums_in),
@@ -69,7 +70,8 @@ namespace Functors {
                     n_lines(n_lines_in),
                     n_cols(n_cols_in),
                     bands_size(bands_size_in),
-                    coalesced_memory_width(coalesced_memory_width_in) {}
+                    coalesced_memory_width(coalesced_memory_width_in),
+                    reflectance_scale_factor(reflectance_scale_factor_in) {}
 
         BaseFunctor() = default;
 
@@ -186,8 +188,9 @@ namespace Functors {
                   size_t n_lines_in,
                   size_t n_cols_in,
                   size_t bands_size_in,
-                  size_t coalesced_memory_width_in)
-            : BaseFunctor<Data_access>(img_in, spectrums_in, results_in, n_spectrums_in, n_lines_in, n_cols_in, bands_size_in, coalesced_memory_width_in) {}
+                  size_t coalesced_memory_width_in,
+                  size_t reflectance_scale_factor_in)
+                    : BaseFunctor<Data_access>(img_in, spectrums_in, results_in, n_spectrums_in, n_lines_in, n_cols_in, bands_size_in, coalesced_memory_width_in, reflectance_scale_factor_in) {}
           
         static inline constexpr float results_initial_value() { return FLOAT_MAX; }
 
@@ -297,8 +300,9 @@ namespace Functors {
             size_t n_lines_in,
             size_t n_cols_in,
             size_t bands_size_in,
-            size_t coalesced_memory_width_in)
-            : BaseFunctor<Data_access>(img_in, spectrums_in, results_in, n_spectrums_in, n_lines_in, n_cols_in, bands_size_in, coalesced_memory_width_in) {}
+            size_t coalesced_memory_width_in,
+            size_t reflectance_scale_factor_in)
+            : BaseFunctor<Data_access>(img_in, spectrums_in, results_in, n_spectrums_in, n_lines_in, n_cols_in, bands_size_in, coalesced_memory_width_in, reflectance_scale_factor_in) {}
 
         static inline constexpr float results_initial_value() { return -1.1f; }
         static inline const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return cols * lines /  pixels_per_thread; }
@@ -434,10 +438,13 @@ namespace Functors {
                     float sum_sqrd_reference_values = 0.0f;
                     float sum_pixel_by_reference_values = 0.0f;
 
-                    #pragma unroll 10
+                    #pragma unroll
                     for (size_t i = 0; i < this->bands_size; i++) {
-                        float pixel_value = this->img_d[img_offset + (i * this->n_cols)];
-                        float spectrum_value = local_mem[spectrum_index++];
+                        size_t specs_index = spectrum_index++;
+                        size_t img_index = img_offset + (i * this->n_cols);
+
+                        float pixel_value = this->img_d[img_index]/this->reflectance_scale_factor;
+                        float spectrum_value = local_mem[specs_index];
 
                         sum_pixel_values += pixel_value;
                         sum_reference_values += spectrum_value;
@@ -483,8 +490,11 @@ namespace Functors {
 
                         #pragma unroll 10
                         for (size_t i = 0; i < this->bands_size; i++) {
-                            float pixel_value = this->img_d[img_offset + (i * this->n_cols)];
-                            float spectrum_value = local_mem[spectrum_index++];
+                            size_t specs_index = spectrum_index++;
+                            size_t img_index = img_offset + (i * this->n_cols);
+
+                            float pixel_value = this->img_d[img_index]/this->reflectance_scale_factor;
+                            float spectrum_value = local_mem[specs_index];
 
                             sum_pixel_values += pixel_value;
                             sum_reference_values += spectrum_value;

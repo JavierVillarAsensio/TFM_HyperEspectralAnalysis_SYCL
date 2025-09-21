@@ -18,7 +18,7 @@ output_folder = ./output
 given_spectrums_folder = ./spectrums/given_spectrums
 test_spectrums_folder = ./spectrums/test_materials
 
-cxx = icpx -std=c++20 -g -O2 -fsycl -fno-inline -fsycl-device-code-split=per_kernel -I$(include_folder)
+cxx = icpx -std=c++20 -g -O3 -fsycl -fno-inline -fsycl-device-code-split=per_kernel -I$(include_folder)
 precompiled = $(object_files_folder)/ENVI_reader.o $(object_files_folder)/Analyzer_tools.o $(object_files_folder)/Results_writer.o
 analyzer_precompiled = $(precompiled) $(object_files_folder)/Analyzer.o
 test_precompiled = $(precompiled) $(object_files_folder)/tests.o
@@ -64,7 +64,7 @@ run_test: $(test_binary) clean_output
 	./$(test_binary) -s $(test_folder)$(test_spectrums) -i $(test_folder)$(JR_folder)$(test_folder_extension) -d GPU
 
 run_Analyzer: $(binary) clean_output
-	./$(binary) -s $(test_spectrums_folder) -i $(analyzer_JR_folder)
+	./$(binary) -s $(test_spectrums_folder) -i $(analyzer_JR_folder) -a CCM -d GPU
 
 run_Analyzer_JR: $(binary) clean_output
 	./$(binary) -s $(given_spectrums_folder) -i $(analyzer_JR_folder) -a CCM -d GPU

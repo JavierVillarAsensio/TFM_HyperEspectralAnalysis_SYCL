@@ -61,7 +61,8 @@ exit_code common_analysis(Analyzer_tools::Analyzer_properties& analyzer_properti
                                                                          analyzer_properties.envi_properties.lines,
                                                                          analyzer_properties.envi_properties.samples,
                                                                          analyzer_properties.envi_properties.bands,
-                                                                         analyzer_properties.coalescent_read_size);
+                                                                         analyzer_properties.coalescent_read_size,
+                                                                         analyzer_properties.envi_properties.reflectance_scale_factor/PERCENTAGE_FACTOR);
 
     return return_value;
 }

@@ -1,6 +1,7 @@
 #include <Results_writer.hpp>
 #include <matio.h>
 #include <unordered_map>
+#include <regex>
 
 /* stb_image_write - v1.16 - public domain - http://nothings.org/stb
    writes out PNG/BMP/TGA/JPEG/HDR images to C stdio - Sean Barrett 2010-2015*/
@@ -220,9 +221,12 @@ exit_code compare_result(int *nearest_materials_image, Analyzer_tools::Analyzer_
     
     int endmember_index_to_spectrum_index[JR_N_ENDMEMBERS];
     for(int translation = 0; translation < JR_N_ENDMEMBERS; translation++)
-        for(int spectrum = 0; spectrum < JR_N_ENDMEMBERS; spectrum++)
-            if(materials[spectrum] == endmembers[translation])
+        for(int spectrum = 0; spectrum < JR_N_ENDMEMBERS; spectrum++){
+            string material = regex_replace(materials[spectrum], regex("[^a-zA-Z0-9]"), "");
+            bool equals = material == endmembers[translation];
+            if(equals)
                 endmember_index_to_spectrum_index[translation] = spectrum;
+        }
 
     mat = Mat_Open(MAT_FILE, MAT_ACC_RDONLY);
     if (mat == nullptr) {

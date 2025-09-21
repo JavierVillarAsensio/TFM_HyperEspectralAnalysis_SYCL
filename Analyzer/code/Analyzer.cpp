@@ -6,14 +6,7 @@
 
 #define OUTPUT_FOLDER "output/"
 
-//spectrum needed fields for reading Jasper Ridge files
-#define SPECTRUM_N_NEEDED_FIELDS 4
-#define SPECTRUM_FIRST_VALUE_FIELD "First X Value"
-#define SPECTRUM_LAST_VALUE_FIELD "Last X Value" 
-#define SPECTRUM_WAVELENGTH_UNIT_FIELD "X Units"
-#define SPECTRUM_NAME_FIELD "Name"
-
-#define MICROMETERS_IN_A_METER 1000000 //for jasper ridge files
+constexpr bool JR = false;
 
 using namespace std;
 
@@ -130,8 +123,10 @@ int main(int argc, char* argv[]) {
 
     if(opt_img_copied.has_value())
         opt_img_copied.value().wait();
+
     CHR_time_point start_scale_img = chrono::high_resolution_clock::now();
     //////////////////////////////Scale img///////////////////////////////////
+    /*
     Event_opt img_scaled;
     if(opt_img_copied.has_value())
         img_scaled = opt_img_copied.value();
@@ -139,8 +134,8 @@ int main(int argc, char* argv[]) {
 
     if(img_scaled.has_value())
         img_scaled.value().wait();
-    CHR_time_point start_copy_spectrums = chrono::high_resolution_clock::now();
-
+    */CHR_time_point start_copy_spectrums = chrono::high_resolution_clock::now();
+    
     ////////////////////////////Read spectrums////////////////////////////////
     size_t n_spectrums;
     float* spectrums_h;
@@ -153,7 +148,6 @@ int main(int argc, char* argv[]) {
         if(Analyzer_tools::read_spectrums(analyzer_properties, n_spectrums, spectrums_h, names))
             return EXIT_FAILURE;
     }
-    
 
     free(img_h);
     analyzer_properties.n_spectrums = n_spectrums;
@@ -226,7 +220,7 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    bool create_confusion_matrix = false;
+    bool create_confusion_matrix = true;
     if (create_confusion_matrix) {
         if(compare_result(nearest_materials_image, analyzer_properties, names)) {
             cerr << "ERROR: comparing JasperRidge results. Aborting...";
