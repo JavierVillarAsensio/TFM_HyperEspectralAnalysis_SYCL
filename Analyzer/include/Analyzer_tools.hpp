@@ -113,7 +113,6 @@ namespace Analyzer_tools {
                     
                     if constexpr (std::is_same_v<Range_type, sycl::nd_range<1>> && Static_f::has_ND() && Static_f::uses_local_mem()) { 
                         if(HAS_LOCAL_MEM(p)) {  //nd with local mem
-                            std::cout << "Range: " << range.get_global_range()[0] << ", " << range.get_local_range()[0] << std::endl;
                             size_t local_range_size = range.get_local_range()[0];
                             size_t local_mem_size = Static_f::get_local_mem_size(p.envi_properties.lines, p.envi_properties.samples, p.envi_properties.bands, p.n_spectrums, local_range_size);
                             sycl::local_accessor<float, 1> local_mem(local_mem_size, h);

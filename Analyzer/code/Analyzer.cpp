@@ -220,7 +220,7 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    bool create_confusion_matrix = true;
+    bool create_confusion_matrix = false;
     if (create_confusion_matrix) {
         if(compare_result(nearest_materials_image, analyzer_properties, names)) {
             cerr << "ERROR: comparing JasperRidge results. Aborting...";

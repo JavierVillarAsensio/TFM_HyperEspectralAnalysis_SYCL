@@ -57,12 +57,12 @@ exit_code common_analysis(Analyzer_tools::Analyzer_properties& analyzer_properti
     Analyzer_tools::copy_to_device(analyzer_properties.USE_ACCESSORS, device_q, results_d, final_results_h, results_size, &copied_event);
 
     return_value = Analyzer_tools::launch_kernel<Functor>(device_q, kernel_finished, copied_event, analyzer_properties, array{img_d, spectrums_d, results_d}, 
-                                                                         analyzer_properties.n_spectrums,
-                                                                         analyzer_properties.envi_properties.lines,
-                                                                         analyzer_properties.envi_properties.samples,
-                                                                         analyzer_properties.envi_properties.bands,
-                                                                         analyzer_properties.coalescent_read_size,
-                                                                         analyzer_properties.envi_properties.reflectance_scale_factor/PERCENTAGE_FACTOR);
+                                                          analyzer_properties.n_spectrums,
+                                                          analyzer_properties.envi_properties.lines,
+                                                          analyzer_properties.envi_properties.samples,
+                                                          analyzer_properties.envi_properties.bands,
+                                                          analyzer_properties.coalescent_read_size,
+                                                          analyzer_properties.envi_properties.reflectance_scale_factor/PERCENTAGE_FACTOR);
 
     return return_value;
 }
