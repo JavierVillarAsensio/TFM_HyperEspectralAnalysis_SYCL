@@ -18,8 +18,8 @@ output_folder = ./output
 given_spectrums_folder = ./spectrums/given_spectrums
 test_spectrums_folder = ./spectrums/test_materials
 
-cxx = icpx -std=c++20 -g -O3 -fsycl -fno-inline -fsycl-device-code-split=per_kernel -I$(include_folder)
-precompiled = $(object_files_folder)/ENVI_reader.o $(object_files_folder)/Analyzer_tools.o $(object_files_folder)/Results_writer.o
+cxx = icpx -std=c++20 -g -O3 -fsycl -fsycl-device-code-split=per_kernel -I$(include_folder)
+precompiled = $(object_files_folder)/ENVI_reader.o $(object_files_folder)/Analyzer_tools.o $(object_files_folder)/Results_writer.o $(object_files_folder)/Functors.o
 analyzer_precompiled = $(precompiled) $(object_files_folder)/Analyzer.o
 test_precompiled = $(precompiled) $(object_files_folder)/tests.o
 
@@ -43,6 +43,9 @@ $(object_files_folder)/Analyzer.o: $(cpp_folder)/Analyzer.cpp $(include_folder)/
 	$(cxx) -c $< -o $@
 
 $(object_files_folder)/write_bigger_images.o: $(test_folder)/write_bigger_images.cpp $(include_folder)/ENVI_reader.hpp | $(object_files_folder)
+	$(cxx) -c $< -o $@
+
+$(object_files_folder)/Functors.o: $(cpp_folder)/Functors.cpp $(include_folder)/Functors.hpp | $(object_files_folder)
 	$(cxx) -c $< -o $@
 
 # ----------------------- compilations ---------------------- #
