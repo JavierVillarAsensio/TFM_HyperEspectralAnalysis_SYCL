@@ -466,7 +466,6 @@ namespace Functors {
                 float best_spectrum_index = this->n_spectrums; //incorrect value
 
                 size_t spectrum_index = 0;
-                float pixel[this->bands_size];
                 if(img_offset >= (this->n_lines * this->n_cols * this->bands_size))
                     break;
 
