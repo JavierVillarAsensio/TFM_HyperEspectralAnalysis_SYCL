@@ -1,6 +1,6 @@
 #include <Functors.hpp>
 
-SYCL_EXTERNAL float compute_correlation(
+SYCL_EXTERNAL float compute_correlation_local_mem(
     size_t spectrum_idx,
     sycl::local_accessor<float, 1> &local_mem,
     float* pixel,

@@ -1,5 +1,5 @@
 /Test
-/Analyzer.exe
+*.exe
 /bigger_images_writer
 .vscode/
 /Analyzer/object_files/

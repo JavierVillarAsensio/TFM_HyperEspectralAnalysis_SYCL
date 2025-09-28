@@ -24,6 +24,7 @@ analyzer_precompiled = $(precompiled) $(object_files_folder)/Analyzer.o
 test_precompiled = $(precompiled) $(object_files_folder)/tests.o
 
 image_writer_binary = bigger_images_writer
+serial_CCM_binary = serial.exe
 
 # --------------------- precompilations --------------------- #
 
@@ -48,6 +49,9 @@ $(object_files_folder)/write_bigger_images.o: $(test_folder)/write_bigger_images
 $(object_files_folder)/Functors.o: $(cpp_folder)/Functors.cpp $(include_folder)/Functors.hpp | $(object_files_folder)
 	$(cxx) -c $< -o $@
 
+$(object_files_folder)/serial.o: $(test_folder)/CCM_serial_execution.cpp $(include_folder)/Analyzer_tools.hpp $(include_folder)/ENVI_reader.hpp | $(object_files_folder)
+	$(cxx) -c $< -o $@
+
 # ----------------------- compilations ---------------------- #
 
 $(test_binary): $(test_precompiled) 
@@ -60,6 +64,9 @@ $(binary): $(analyzer_precompiled)
 
 $(image_writer_binary): $(object_files_folder)/ENVI_reader.o $(object_files_folder)/write_bigger_images.o | $(object_files_folder)
 	$(cxx) $^ -o $@
+
+$(serial_CCM_binary): $(precompiled) $(object_files_folder)/serial.o | $(object_files_folder)
+	icpx -std=c++20 -g -O3 -fsycl -fsycl-device-code-split=per_kernel -I$(include_folder) $^ -lmatio -o $@
 
 # --------------------------- run --------------------------- #
 
@@ -74,6 +81,9 @@ run_Analyzer_JR: $(binary) clean_output
 
 run_image_writer: $(image_writer_binary) clean_output
 	./$(image_writer_binary) $(analyzer_JR_folder) $(test_folder) 2
+
+run_serial_CCM: $(serial_CCM_binary)
+	./$(serial_CCM_binary)
 
 
 # -------------------------- utils -------------------------- #

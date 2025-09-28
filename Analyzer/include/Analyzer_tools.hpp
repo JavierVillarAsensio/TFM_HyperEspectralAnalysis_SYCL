@@ -116,7 +116,6 @@ namespace Analyzer_tools {
                             size_t local_range_size = range.get_local_range()[0];
                             size_t local_mem_size = Static_f::get_local_mem_size(p.envi_properties.lines, p.envi_properties.samples, p.envi_properties.bands, p.n_spectrums, local_range_size);
                             sycl::local_accessor<float, 1> local_mem(local_mem_size, h);
-                            std::cout << "Range: " << range.get_global_range()[0] << ", Local range: " << range.get_local_range()[0] << ", Local mem size: " << local_mem_size * sizeof(float) / 1024 << " KB" << std::endl;
 
                             h.parallel_for<KernelName<Functor, decltype(functor.img_d), Range_type, true>>(range, [=](sycl::nd_item<1> i) {
                                 functor(i, local_mem);

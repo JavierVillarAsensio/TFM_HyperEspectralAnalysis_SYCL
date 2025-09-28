@@ -198,15 +198,7 @@ int main(int argc, char* argv[]) {
     cout << "Results copied from device to host with no errors." << endl;
 
     if(results_back.has_value())
-        results_back.value().wait(); 
-
-    cout << "Some results: ";
-    for (size_t i = 0; i < 198; i++)
-    {
-        cout << final_results_h[i] << ","; 
-    }
-    cout << endl;
-    
+        results_back.value().wait();     
 
     for(size_t i = 0; i < img_2Dsize; i++)
         nearest_materials_image[i] = (int)final_results_h[i];
