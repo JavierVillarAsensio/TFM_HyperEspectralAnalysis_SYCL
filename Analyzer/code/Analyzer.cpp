@@ -201,9 +201,9 @@ int main(int argc, char* argv[]) {
         results_back.value().wait(); 
 
     cout << "Some results: ";
-    for (size_t i = 0; i < 5; i++)
+    for (size_t i = 0; i < 198; i++)
     {
-        cout << final_results_h[i] << " "; 
+        cout << final_results_h[i] << ","; 
     }
     cout << endl;
     

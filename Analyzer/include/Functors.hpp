@@ -10,7 +10,7 @@ SYCL_EXTERNAL float compute_correlation(
     size_t spectrum_idx,
     sycl::local_accessor<float, 1> &local_mem,
     float* pixel,
-    short bands_size,
+    size_t bands_size,
     float sum_pixel_values,
     float sum_sqrd_pixel_values,
     float denominator_part
@@ -448,10 +448,12 @@ namespace Functors {
                 float sum_pixel_values = 0.0f;
                 float sum_sqrd_pixel_values = 0.0f;
                 float denominator_part;
+                float read_value;
                 for(short i = 0; i < this->bands_size; i++){
-                    pixel[i] = this->img_d[img_offset + (i * this->bands_size)]/this->reflectance_scale_factor;
-                    sum_pixel_values += pixel[i];
-                    sum_sqrd_pixel_values += pixel[i] * pixel[i];
+                    read_value = this->img_d[img_offset + (i * this->bands_size)]/this->reflectance_scale_factor;
+                    pixel[i] = read_value;
+                    sum_pixel_values += read_value;
+                    sum_sqrd_pixel_values += read_value * read_value;
                 }
                 denominator_part = (this->bands_size * sum_sqrd_pixel_values - sum_pixel_values * sum_pixel_values);
 
@@ -470,9 +472,14 @@ namespace Functors {
                         highest_correlation = calculated_correlation;
                         best_spectrum_index = spectrum;            
                     }
+
+                    if(group_id == 0 && local_id == 0 && p == 0){
+                        this->results_d[spectrum] = calculated_correlation;
+                    }
                 }
                 
-                this->results_d[pixel_offset_2D] = best_spectrum_index;
+                
+                //this->results_d[pixel_offset_2D] = best_spectrum_index;
                 
             }
 
