@@ -4,7 +4,7 @@ SYCL_EXTERNAL float compute_correlation(
     size_t spectrum_idx,
     sycl::local_accessor<float, 1> &local_mem,
     float* pixel,
-    size_t bands_size,
+    short bands_size,
     float sum_pixel_values,
     float sum_sqrd_pixel_values,
     float denominator_part
@@ -18,7 +18,7 @@ SYCL_EXTERNAL float compute_correlation(
         short pixel_idx = 0;
 
         #pragma unroll 1
-        for (short i = specs_index_start; i < specs_index_end; i++) {
+        for (uint16_t i = specs_index_start; i < specs_index_end; i++) {
             float spectrum_value = local_mem[i];
 
             sum_reference_values += spectrum_value;

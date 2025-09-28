@@ -6,7 +6,7 @@
 
 #define OUTPUT_FOLDER "output/"
 
-constexpr bool JR = false;
+constexpr bool JR = true;
 
 using namespace std;
 
@@ -199,6 +199,14 @@ int main(int argc, char* argv[]) {
 
     if(results_back.has_value())
         results_back.value().wait(); 
+
+    cout << "Some results: ";
+    for (size_t i = 0; i < 5; i++)
+    {
+        cout << final_results_h[i] << " "; 
+    }
+    cout << endl;
+    
 
     for(size_t i = 0; i < img_2Dsize; i++)
         nearest_materials_image[i] = (int)final_results_h[i];

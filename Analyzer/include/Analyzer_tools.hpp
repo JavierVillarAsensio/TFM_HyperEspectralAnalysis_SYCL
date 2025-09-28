@@ -69,7 +69,7 @@ namespace Analyzer_tools {
         struct KernelName{};
 
         template<template <typename> typename Functor, typename Data_access_type, typename... Args>
-        Functor<Data_access_type> construct_functor(std::array<Data_access_type, Functor<Data_access_type>::get_n_access_points()>& arr, Analyzer_properties& p, sycl::handler& h, Args... args){
+        Functor<Data_access_type> construct_functor(std::array<Data_access_type, Functor<Data_access_type>::get_n_access_points()>& arr, sycl::handler& h, Args... args){
             
             return [&]<size_t... Indexes>(std::index_sequence<Indexes...>) {
                     return Functor<Data_access_type> ( arr[Indexes]..., std::forward<Args>(args)...);
@@ -77,7 +77,7 @@ namespace Analyzer_tools {
         }
 
         template <template <typename> typename Functor, size_t array_size, typename Data_access_type, typename... Args>
-        auto make_functor(Data_access_type /*detect type*/, std::array<Data_access_type, array_size>& accesses, Analyzer_properties& p, sycl::handler& h, Args&&... args) {
+        auto make_functor(Data_access_type /*detect type*/, std::array<Data_access_type, array_size>& accesses, sycl::handler& h, Args&&... args) {
 
             using Array_type = std::conditional_t<std::is_same_v<Data_access_type, sycl::buffer<float,1>>, std::array<Acc, array_size>, std::array<float*, array_size>>;
             using Array_data_type = std::conditional_t<std::is_same_v<Data_access_type, sycl::buffer<float, 1>>, Acc, float*>;
@@ -91,7 +91,7 @@ namespace Analyzer_tools {
             else if constexpr (std::is_same_v<Data_access_type, float*>)
                 array_in = accesses;
 
-            return construct_functor<Functor, Array_data_type>(array_in, p, h, std::forward<Args>(args)...);
+            return construct_functor<Functor, Array_data_type>(array_in, h, std::forward<Args>(args)...);
         }
 
         template <typename Data_access_type, size_t N_ACCESSES, typename ArrayType>
@@ -109,13 +109,14 @@ namespace Analyzer_tools {
                     if(opt_dependency.has_value())
                         h.depends_on(opt_dependency.value());
 
-                    auto functor = detail::make_functor<Functor, array_size, Data_access_type>(accesses[0], accesses, p, h, std::forward<Args>(args)...);
+                    auto functor = detail::make_functor<Functor, array_size, Data_access_type>(accesses[0], accesses, h, std::forward<Args>(args)...);
                     
                     if constexpr (std::is_same_v<Range_type, sycl::nd_range<1>> && Static_f::has_ND() && Static_f::uses_local_mem()) { 
                         if(HAS_LOCAL_MEM(p)) {  //nd with local mem
                             size_t local_range_size = range.get_local_range()[0];
                             size_t local_mem_size = Static_f::get_local_mem_size(p.envi_properties.lines, p.envi_properties.samples, p.envi_properties.bands, p.n_spectrums, local_range_size);
                             sycl::local_accessor<float, 1> local_mem(local_mem_size, h);
+                            std::cout << "Range: " << range.get_global_range()[0] << ", Local range: " << range.get_local_range()[0] << ", Local mem size: " << local_mem_size * sizeof(float) / 1024 << " KB" << std::endl;
 
                             h.parallel_for<KernelName<Functor, decltype(functor.img_d), Range_type, true>>(range, [=](sycl::nd_item<1> i) {
                                 functor(i, local_mem);

@@ -10,7 +10,7 @@ SYCL_EXTERNAL float compute_correlation(
     size_t spectrum_idx,
     sycl::local_accessor<float, 1> &local_mem,
     float* pixel,
-    size_t bands_size,
+    short bands_size,
     float sum_pixel_values,
     float sum_sqrd_pixel_values,
     float denominator_part
@@ -269,7 +269,7 @@ namespace Functors {
 
     template<typename Data_access>
     struct CCM : BaseFunctor<Data_access>{  
-        static const size_t pixels_per_thread = 50; //to reduce the impact of memory latency
+        static const size_t pixels_per_thread = 5; //to reduce the impact of memory latency
         CCM(Data_access img_in, 
             Data_access spectrums_in, 
             Data_access results_in, 
@@ -290,7 +290,11 @@ namespace Functors {
                    coalesced_memory_width_in, 
                    reflectance_scale_factor_in) {}
 
-        static inline const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { return cols * lines /  pixels_per_thread; }
+        static inline const size_t get_range_global_size(size_t lines, size_t cols, size_t bands, size_t n_spectrums, bool has_local_mem) { 
+            size_t size = cols * lines /  pixels_per_thread;
+            if(size == 0) size = 2;
+            return size; 
+        }
 
         //kernel for basic
         void operator()(sycl::id<1> id) const {
@@ -428,6 +432,7 @@ namespace Functors {
 
             id.barrier(); //wait until the local memory copy is finished
          
+            size_t max_index = this->n_lines * this->n_cols * this->bands_size;
             for(size_t p = 0; p < this->pixels_per_thread; p++){
                 size_t pixel_offset_2D = (group_id * local_range * pixels_per_thread) + (local_range * p) + local_id;
                 size_t img_offset = pixel_offset_2D / this->n_cols * (this->n_cols * this->bands_size) + pixel_offset_2D % this->n_cols;
@@ -436,8 +441,7 @@ namespace Functors {
                 float best_spectrum_index = this->n_spectrums; //incorrect value
                 float calculated_correlation;
 
-                size_t spectrum_index = 0;
-                if(img_offset >= (this->n_lines * this->n_cols * this->bands_size))
+                if(img_offset >= max_index)
                     break;
 
                 float pixel[256];
@@ -465,12 +469,14 @@ namespace Functors {
                     if(calculated_correlation > highest_correlation) {
                         highest_correlation = calculated_correlation;
                         best_spectrum_index = spectrum;            
-                    } 
+                    }
                 }
+                
                 this->results_d[pixel_offset_2D] = best_spectrum_index;
+                
             }
 
-            if(group_id == id.get_group_range()[0] - 1){ //last work-group
+            if(group_id == id.get_group_range()[0] - 1 && false){ //last work-group
                 size_t pixel_offset_2D_last_pixels = ((group_id + 1) * local_range * pixels_per_thread) + local_id;
                 size_t last_pixel_index = this->n_lines * this->n_cols;
                 if(pixel_offset_2D_last_pixels < last_pixel_index) {
